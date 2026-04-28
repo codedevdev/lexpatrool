@@ -1,5 +1,9 @@
 # LexPatrol
 
+[![Последний релиз](https://img.shields.io/github/v/release/codedevdev/lexpatrool?style=flat-square&logo=github&label=релиз)](https://github.com/codedevdev/lexpatrool/releases/latest)
+[![Сборка Windows](https://img.shields.io/github/actions/workflow/status/codedevdev/lexpatrool/release-windows.yml?branch=main&style=flat-square&logo=githubactions&label=сборка)](https://github.com/codedevdev/lexpatrool/actions/workflows/release-windows.yml)
+[![Скачивания (все релизы)](https://img.shields.io/github/downloads/codedevdev/lexpatrool/total?style=flat-square&logo=github&label=скачивания)](https://github.com/codedevdev/lexpatrool/releases)
+
 **Справочник норм и правил для ролевой игры в государственных организациях GTA5RP** (полиция / LSPD-style, шериф, EMS и др.). Десктопное приложение под **Windows**: локальная база статей, быстрый поиск и отдельное окно **оверлея** поверх игры (обычное окно ОС, не изменение клиента GTA5). Импорт — из ваших материалов или через встроенный браузер после входа на сайт.
 
 <p align="center">
@@ -10,9 +14,11 @@
 
 ## Сборки и релизы
 
+Иконки под заголовком: **[релиз](https://github.com/codedevdev/lexpatrool/releases/latest)** — последняя опубликованная версия по тегам; **[сборка](https://github.com/codedevdev/lexpatrool/actions/workflows/release-windows.yml)** — статус workflow на `main`; **[скачивания](https://github.com/codedevdev/lexpatrool/releases)** — суммарное число загрузок всех файлов из Releases (данные GitHub).
+
 Готовые **установщик (NSIS)** и **portable** `.exe` для Windows публикуются в [**Releases**](https://github.com/codedevdev/lexpatrool/releases/latest) — актуальная сборка на странице **Latest**.
 
-Сборка и загрузка файлов в релиз выполняются **GitHub Actions** (workflow `.github/workflows/release-windows.yml`): после push тега вида `v1.0.0` (версию синхронизируйте с полем `version` в `package.json`) в Releases появится новая версия с установщиком и portable. Ручной запуск workflow (**Actions → Release (Windows) → Run workflow**) собирает проект и прикрепляет `.exe` как артефакты прогона (без создания GitHub Release).
+Сборка и загрузка файлов в релиз выполняются **GitHub Actions** (workflow `.github/workflows/release-windows.yml`): после push тега вида `v1.1.0` (версию синхронизируйте с полем `version` в `package.json`) в Releases появится новая версия с установщиком и portable. Ручной запуск workflow (**Actions → Release (Windows) → Run workflow**) собирает проект и прикрепляет `.exe` как артефакты прогона (без создания GitHub Release).
 
 
 ---
