@@ -45,7 +45,7 @@ jobs:
             LexPatrool-bin/LexPatrol Setup *.exe
             LexPatrool-bin/LexPatrol *.exe
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Upload artifacts (manual workflow run)
         if: github.event_name == 'workflow_dispatch'
