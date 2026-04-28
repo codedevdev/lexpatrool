@@ -22,10 +22,10 @@ export function DashboardPage(): JSX.Element {
           LexPatrol <span className="text-base font-normal text-app-muted">— обзор</span>
         </h1>
         <p className="mt-2 text-sm text-app-muted max-w-2xl leading-relaxed">
-          Справочник по правилам вашего сервера для роли в{' '}
-          <strong className="text-app/95">государственных организациях</strong> (полиция Los Santos, шериф, EMS и другие
-          структуры — по вашему сценарию). Импортируйте тексты, ищите по базе, закрепляйте статьи в отдельном окне оверлея
-          поверх игры — это обычное окно Windows, не модификация клиента GTA5.
+          Справочник по правилам <strong className="text-app/95">вашего</strong> RP-сценария для роли в{' '}
+          <strong className="text-app/95">государственных службах</strong> (полиция, шериф, EMS и другие структуры — как
+          задаёт ваш сервер или фракция). Импортируйте тексты, ищите по базе, закрепляйте статьи в оверлее поверх игры — это
+          обычное окно Windows, не модификация клиента игры.
         </p>
       </header>
 

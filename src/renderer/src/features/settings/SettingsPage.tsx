@@ -3,6 +3,8 @@ import { keyboardEventToAccelerator } from '../../lib/hotkey-format'
 
 type HotkeyField = 'toggle' | 'search' | 'clickThrough'
 
+const UPDATE_NOTIFY_KEY = 'update_notify_startup'
+
 export function SettingsPage(): JSX.Element {
   const [opacity, setOpacity] = useState(0.92)
   const [clickThrough, setClickThrough] = useState(false)
@@ -24,10 +26,12 @@ export function SettingsPage(): JSX.Element {
   const [updateResult, setUpdateResult] = useState<Awaited<ReturnType<typeof window.lawHelper.update.check>> | null>(
     null
   )
+  const [notifyOnStartup, setNotifyOnStartup] = useState(true)
 
   useEffect(() => {
     void window.lawHelper.getVersion().then(setAppVersion)
     void window.lawHelper.update.repoLabel().then(setUpdateRepo)
+    void window.lawHelper.settings.get(UPDATE_NOTIFY_KEY).then((v) => setNotifyOnStartup(v !== '0'))
   }, [])
 
   useEffect(() => {
@@ -122,7 +126,7 @@ export function SettingsPage(): JSX.Element {
         setUpdateInfo(r.message ?? 'У вас установлена последняя доступная версия.')
       } else if (r.status === 'available') {
         setUpdateInfo(
-          `Доступна версия ${r.latestVersion}. Установщик берите со страницы релиза; при желании сверьте контрольную сумму в блоке файлов.`
+          `Доступна версия ${r.latestVersion}. Скачайте файл по кнопке ниже, закройте LexPatrol и запустите установщик.`
         )
       } else if (r.status === 'skipped') {
         setUpdateInfo(r.message ?? 'Проверка отключена.')
@@ -148,8 +152,8 @@ export function SettingsPage(): JSX.Element {
         <h2 className="text-sm font-semibold text-white">Что здесь настраивается</h2>
         <ul className="list-inside list-disc space-y-2 text-xs leading-relaxed text-app-muted">
           <li>
-            <span className="text-white/85">Обновления</span> — ручная проверка новой сборки на GitHub и переход к странице релиза
-            или файлу установки.
+            <span className="text-white/85">Обновления</span> — узнать о новой версии и перейти к файлу на GitHub; установка —
+            скачать и запустить установщик самостоятельно.
           </li>
           <li>
             <span className="text-white/85">Горячие клавиши</span> — три действия по всей системе (оверлей, поиск по базе, режим
@@ -173,11 +177,40 @@ export function SettingsPage(): JSX.Element {
       <section className="glass space-y-4 rounded-2xl p-6">
         <h2 className="text-sm font-semibold text-white">Обновления</h2>
         <p className="text-xs leading-relaxed text-app-muted">
-          Текущая версия: <span className="font-mono text-white/90">{appVersion || '…'}</span>. Обновления проверяются по
-          официальным релизам на{' '}
-          <span className="font-mono text-white/80">github.com/{updateRepo || '…'}</span>. Установочный файл скачивается с
-          страницы релиза; наличие подписи зависит от настроек сборки.
+          Сейчас у вас версия <span className="font-mono text-white/90">{appVersion || '…'}</span>. Файлы новых версий лежат на{' '}
+          <span className="font-mono text-white/80">github.com/{updateRepo || '…'}</span> — приложение лишь показывает, что
+          вышло обновление, и ведёт к странице со скачиванием.
         </p>
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-white/25 bg-surface-raised text-accent focus:ring-accent"
+            checked={notifyOnStartup}
+            onChange={(e) => {
+              const on = e.target.checked
+              setNotifyOnStartup(on)
+              void window.lawHelper.settings.set(UPDATE_NOTIFY_KEY, on ? '1' : '0')
+            }}
+          />
+          <span className="text-sm leading-snug text-app-muted">
+            <span className="font-medium text-white">Напоминать при запуске</span>, если найдена более новая версия. Снимите
+            галочку, если не нужна полоска-уведомление сверху окна.
+          </span>
+        </label>
+
+        <details className="rounded-xl border border-white/[0.06] bg-black/20 px-4 py-3 text-xs text-app-muted">
+          <summary className="cursor-pointer select-none font-medium text-white/90">Как установить обновление</summary>
+          <ol className="mt-3 list-decimal space-y-2 pl-5 leading-relaxed marker:text-accent">
+            <li>Нажмите «Проверить обновления» ниже или воспользуйтесь напоминанием — откроется страница релиза.</li>
+            <li>Скачайте установщик (.exe). Программа не качает и не ставит обновление без вашего участия.</li>
+            <li>Закройте LexPatrol, запустите скачанный файл и следуйте шагам установки. Затем снова откройте приложение.</li>
+          </ol>
+          <p className="mt-3 border-t border-white/[0.06] pt-3 text-[11px] leading-relaxed text-app-muted/95">
+            Так вы сами решаете, когда скачать файл и запустить установку — всё под вашим контролем.
+          </p>
+        </details>
+
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -209,6 +242,18 @@ export function SettingsPage(): JSX.Element {
           ) : null}
         </div>
         {updateInfo ? <p className="text-sm text-app-muted">{updateInfo}</p> : null}
+        {updateResult?.status === 'available' && updateResult.message ? (
+          <div className="rounded-xl border border-white/[0.08] bg-black/25 p-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-app-muted">Описание релиза</p>
+            <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-app-muted">
+              {updateResult.message}
+            </pre>
+          </div>
+        ) : null}
+        <p className="text-[11px] text-app-muted">
+          «Позже» скрывает напоминание для этой версии; когда появится ещё более новая — уведомление снова покажется (если
+          включено напоминание при запуске).
+        </p>
       </section>
 
       <section className="glass space-y-4 rounded-2xl p-6">

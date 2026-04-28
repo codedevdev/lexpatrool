@@ -1,9 +1,12 @@
 /**
  * Проверка обновлений по публичному API GitHub Releases (без electron-updater).
+ * Новая версия не ставится «сама»: пользователь скачивает .exe и запускает установщик (или заменяет portable).
  * Репозиторий: owner/repo в переменной окружения LEX_GITHUB_REPO или по умолчанию codedevdev/lexpatrool.
- * Отключить: LEX_SKIP_UPDATE_CHECK=1
+ * Отключить проверку: LEX_SKIP_UPDATE_CHECK=1
+ * Напоминание при старте: настройка в БД update_notify_startup ('1' / '0', по умолчанию вкл.)
  */
 import { app, type BrowserWindow } from 'electron'
+import { getDb } from './database'
 
 const DEFAULT_REPO = 'codedevdev/lexpatrool'
 const REQUEST_MS = 15_000
@@ -158,11 +161,30 @@ export type UpdateAvailablePayload = {
   currentVersion: string
   latestVersion: string
   releaseUrl: string
+  /** Прямая ссылка на .exe или страница релиза, если отдельного файла нет */
   downloadUrl: string
+  publishedAt?: string
+  /** Обрезанное описание релиза с GitHub (если есть) */
+  releaseNotes?: string
+}
+
+/** Напоминание о новой версии при запуске (настройка «Обновления»). По умолчанию включено. */
+function readNotifyStartupEnabled(): boolean {
+  if (process.env['LEX_SKIP_UPDATE_CHECK'] === '1') return false
+  try {
+    const row = getDb()
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get('update_notify_startup') as { value: string } | undefined
+    if (row?.value === '0') return false
+    return true
+  } catch {
+    return true
+  }
 }
 
 export function scheduleStartupUpdateCheck(getMainWindow: () => BrowserWindow | null): void {
   if (process.env['LEX_SKIP_UPDATE_CHECK'] === '1') return
+  if (!readNotifyStartupEnabled()) return
 
   setTimeout(() => {
     void (async () => {
@@ -177,7 +199,9 @@ export function scheduleStartupUpdateCheck(getMainWindow: () => BrowserWindow | 
           currentVersion: result.currentVersion,
           latestVersion: result.latestVersion,
           releaseUrl: result.releaseUrl,
-          downloadUrl: result.downloadUrl
+          downloadUrl: result.downloadUrl,
+          publishedAt: result.publishedAt,
+          releaseNotes: result.message && result.status === 'available' ? result.message : undefined
         }
         win.webContents.send('app:update-available', payload)
       } catch (e) {

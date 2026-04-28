@@ -48,7 +48,7 @@ function hasSanctionSignals(heading: string, body: string): boolean {
   const t = `${heading}\n${body}`
   if (!t.trim()) return false
 
-  // --- Majestic UK / XenForo (часто санкции на соседних строках, не в первом абзаце) ---
+  // --- XenForo / некоторые форумы в стиле UK (санкции на соседних строках, не в первом абзаце) ---
   // Классификация строки статьи: (F, CR), (A, CR), латиница + кириллическая буква в скобках
   if (/\([A-ZА-ЯЁ],\s*CR\)/i.test(t)) return true
   // Таблица: «… | 3*», «… | 75.000$»

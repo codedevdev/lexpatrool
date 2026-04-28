@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 /**
- * Хаб для сотрудников гос. организаций на GTA5RP (полиция, шериф, EMS, госструктуры).
- * Без привязки к конкретному ведомству РФ — ориентир Los Santos / типичный американский сеттинг RP.
+ * Хаб для роли в государственных службах в RP (полиция, шериф, EMS и т.д.).
+ * Конкретный лор и документы задаются пользователем; приложение не привязано к серверу или издателю игры.
  */
 
 export const DEFAULT_QUICK_SEARCH_PRESETS: { label: string; q: string }[] = [
@@ -143,12 +143,12 @@ export function GovernmentPage(): JSX.Element {
       <header className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-surface-raised/90 via-[#12151c] to-[#0d1118] p-8 shadow-glass">
         <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-accent/10 blur-3xl" />
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/90">LexPatrol</p>
-        <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-accent/85">GTA5RP · гос. организации</p>
+        <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-accent/85">Государственные службы · RP</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">Справочник для госорганов</h1>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-app-muted">
-          Здесь собраны <strong className="text-app/90">ваши</strong> импортированные законы, уставы и приказы. Сценарий —{' '}
-          <strong className="text-white/90">LSPD</strong>, шериф, EMS и другие госструктуры в{' '}
-          <strong className="text-white/90">Los Santos</strong>; состав базы вы задаёте сами через импорт.
+          Здесь собраны <strong className="text-app/90">ваши</strong> импортированные законы, уставы и приказы. Обычно это
+          роль полиции, шерифа, EMS и других структур; названия, города и лор — из правил <strong className="text-white/90">вашего</strong> сервера
+          и тех документов, что вы загрузили.
         </p>
         <div className="mt-6 flex flex-wrap gap-3 text-xs text-app-muted">
           <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1">Документов: {stats.docs}</span>
@@ -320,8 +320,8 @@ export function GovernmentPage(): JSX.Element {
       <section className="rounded-2xl border border-dashed border-white/15 bg-surface/40 p-6">
         <h2 className="text-sm font-semibold text-white">ИИ под вашу роль</h2>
         <p className="mt-2 text-sm text-app-muted">
-          В разделе «ИИ» можно задать агента с ролью и инструкциями (например, краткие ответы от лица LSPD со ссылками на статьи
-          базы). Так выдерживается стиль игры, без смешения с реальными органами.
+          В разделе «ИИ» можно задать агента с ролью и инструкциями (например, краткие ответы «от лица патруля» со ссылками на
+          статьи базы). Так выдерживается стиль сценария, без смешения с реальными органами.
         </p>
         <Link to="/ai" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">
           Настроить провайдера и агентов →

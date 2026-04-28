@@ -44,6 +44,8 @@ declare global {
             latestVersion: string
             releaseUrl: string
             downloadUrl: string
+            publishedAt?: string
+            releaseNotes?: string
           }) => void
         ) => () => void
       }

@@ -56,13 +56,13 @@ export function seedIfEmpty(db: Database): void {
   const catGov = uuid()
   db.prepare(
     `INSERT INTO categories (id, name, parent_id, color, sort_order) VALUES (?, ?, NULL, ?, 1)`
-  ).run(catGov, 'Гос. организации (LSPD / EMS и др.)', '#3ecf8e')
+  ).run(catGov, 'Гос. службы (полиция / EMS и др.)', '#3ecf8e')
 
   const govSource = uuid()
   db.prepare(
     `INSERT INTO sources (id, title, url, source_type, imported_at, tags_json, category_id, code_family, metadata_json)
      VALUES (?, ?, NULL, 'paste_text', ?, ?, ?, 'gov_reference', '{}')`
-  ).run(govSource, 'Шпаргалка: гос. органы (пример)', now, JSON.stringify(['lspd', 'government', 'gta5rp']), catGov)
+  ).run(govSource, 'Шпаргалка: гос. органы (пример)', now, JSON.stringify(['government', 'rp_example', 'police']), catGov)
 
   const govDoc = uuid()
   db.prepare(
@@ -74,7 +74,7 @@ export function seedIfEmpty(db: Database): void {
     {
       n: '1',
       h: 'Статья 1. Общие принципы',
-      b: 'Действуйте по импортированным кодексам и уставам вашего GTA5RP сервера (LSPD, LSSD, EMS и т.д.). Перед мерой проверьте статью в читателе.'
+      b: 'Действуйте по импортированным кодексам и уставам вашего RP-сервера или сценария (полиция, шериф, EMS и т.д.). Перед мерой проверьте статью в читателе.'
     },
     { n: '2', h: 'Статья 2. Документирование', b: 'Фиксируйте обстоятельства согласно регламенту сервера, если он импортирован в базу.' },
     {

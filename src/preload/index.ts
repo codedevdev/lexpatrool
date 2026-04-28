@@ -28,11 +28,20 @@ const api = {
         latestVersion: string
         releaseUrl: string
         downloadUrl: string
+        publishedAt?: string
+        releaseNotes?: string
       }) => void
     ): (() => void) => {
       const handler = (
         _: unknown,
-        p: { currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string }
+        p: {
+          currentVersion: string
+          latestVersion: string
+          releaseUrl: string
+          downloadUrl: string
+          publishedAt?: string
+          releaseNotes?: string
+        }
       ): void => cb(p)
       ipcRenderer.on('app:update-available', handler)
       return () => ipcRenderer.removeListener('app:update-available', handler)

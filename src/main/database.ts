@@ -6,6 +6,8 @@ import { readdirSync } from 'fs'
 import { seedIfEmpty } from './seed'
 
 let db: Database.Database | null = null
+/** Путь к lexpatrol.db после успешного init (для логов / поддержки). */
+let openedDbPath: string | null = null
 
 function migrationsDir(): string {
   if (app.isPackaged) {
@@ -14,10 +16,15 @@ function migrationsDir(): string {
   return join(app.getAppPath(), 'src', 'db', 'migrations')
 }
 
-function openDbPath(): string {
+function resolveDbFilePath(): string {
   const dir = join(app.getPath('userData'), 'data')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return join(dir, 'lexpatrol.db')
+}
+
+/** Абсолютный путь к файлу БД (директория создаётся при первом init). */
+export function getDatabasePath(): string {
+  return openedDbPath ?? resolveDbFilePath()
 }
 
 export function getDb(): Database.Database {
@@ -25,11 +32,45 @@ export function getDb(): Database.Database {
   return db
 }
 
+function configureSqlite(instance: Database.Database): void {
+  instance.pragma('journal_mode = WAL')
+  instance.pragma('foreign_keys = ON')
+  /** С WAL обычно достаточно NORMAL: меньше fsync без потери целостности при типичном одном writer (Electron main). */
+  instance.pragma('synchronous = NORMAL')
+  /**
+   * SQLITE_BUSY при кратковременной конкуренции (антивирус, resize оверлея + запись настроек и т.д.).
+   * Дублирует смысл опции конструктора timeout, но pragma явно видна в отладке.
+   */
+  instance.pragma('busy_timeout = 8000')
+}
+
+/**
+ * Открывает SQLite, применяет миграции и пост-инициализацию.
+ * Повторный вызов без close — возвращает тот же экземпляр (защита от двойного open).
+ */
 export function initDatabase(): Database.Database {
-  const path = openDbPath()
-  db = new Database(path)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
+  if (db) return db
+
+  const path = resolveDbFilePath()
+  const verbose = !app.isPackaged && process.env['LEX_DB_DEBUG'] === '1'
+
+  try {
+    db = new Database(path, {
+      timeout: 8000,
+      readonly: false,
+      fileMustExist: false
+    })
+  } catch (e) {
+    console.error('[LexPatrol] SQLite: не удалось открыть файл', path, e)
+    throw e
+  }
+
+  openedDbPath = path
+  if (verbose) {
+    console.log('[LexPatrol] SQLite:', path)
+  }
+
+  configureSqlite(db)
   applyMigrations(db)
   seedIfEmpty(db)
   cleanupOrphanSources(db)
@@ -76,9 +117,25 @@ function applyMigrations(instance: Database.Database): void {
   }
 }
 
+/**
+ * Закрывает соединение. Перед закрытием — checkpoint WAL (меньше «висящего» wal-файла рядом с db после выхода).
+ * Идемпотентно: повторные вызовы безопасны.
+ */
 export function closeDatabase(): void {
-  if (db) {
-    db.close()
-    db = null
+  if (!db) return
+
+  const instance = db
+  db = null
+
+  try {
+    instance.pragma('wal_checkpoint(TRUNCATE)')
+  } catch {
+    /* занятость / только чтение — не блокируем выход */
+  }
+
+  try {
+    instance.close()
+  } catch (e) {
+    console.warn('[LexPatrol] SQLite: close()', e)
   }
 }

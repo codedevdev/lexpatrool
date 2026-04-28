@@ -21,6 +21,17 @@ type UpdateBanner = {
   latestVersion: string
   releaseUrl: string
   downloadUrl: string
+  publishedAt?: string
+  releaseNotes?: string
+}
+
+function fmtReleaseDate(iso?: string): string {
+  if (!iso?.trim()) return ''
+  try {
+    return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  } catch {
+    return iso
+  }
 }
 
 export function AppShell({ children }: { children: ReactNode }): JSX.Element {
@@ -61,10 +72,10 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               width={64}
               height={64}
             />
-            <div className="mt-3 text-xs uppercase tracking-widest text-app-muted">GTA5RP</div>
+            <div className="mt-3 text-[10px] uppercase tracking-[0.2em] text-app-muted">RP · справочник</div>
             <div className="mt-1 text-lg font-semibold tracking-tight text-white">LexPatrol</div>
             <p className="mt-2 text-xs text-app-muted leading-relaxed">
-              Локальная база норм и быстрый поиск; оверлей для патруля — отдельное окно поверх игры.
+              Локальная база норм и быстрый поиск; оверлей — отдельное окно поверх игры. Не привязано к конкретному серверу.
             </p>
           </div>
           <nav className="px-2 pb-4 space-y-1">
@@ -104,13 +115,22 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             >
               <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 text-sm text-emerald-50/95">
-                  <span className="font-semibold text-white">Доступно обновление LexPatrol</span>{' '}
+                  <span className="font-semibold text-white">Доступна новая версия</span>{' '}
                   <span className="text-emerald-100/85">
                     {banner.currentVersion} → {banner.latestVersion}
                   </span>
-                  <span className="mt-1 block text-xs text-emerald-100/70">
-                    Скачайте сборку со страницы релиза, если доверяете источнику.
+                  {fmtReleaseDate(banner.publishedAt) ? (
+                    <span className="ml-2 text-xs text-emerald-100/55">· {fmtReleaseDate(banner.publishedAt)}</span>
+                  ) : null}
+                  <span className="mt-1 block text-xs leading-snug text-emerald-100/70">
+                    Откроется страница с файлом: скачайте установщик, закройте LexPatrol и запустите его — как при обычной
+                    установке программы.
                   </span>
+                  {banner.releaseNotes ? (
+                    <p className="mt-2 max-h-[4.5rem] overflow-y-auto whitespace-pre-wrap rounded-md border border-emerald-500/20 bg-black/20 px-2 py-1.5 text-[11px] leading-relaxed text-emerald-50/90">
+                      {banner.releaseNotes}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <button

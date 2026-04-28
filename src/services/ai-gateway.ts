@@ -27,7 +27,8 @@ function headersForProvider(cfg: AiProviderConfig): Record<string, string> {
 
 function endpoint(cfg: AiProviderConfig): string {
   if (cfg.provider === 'ollama') {
-    return `${cfg.baseUrl ?? 'http://127.0.0.1:11434'}/api/chat`
+    const base = (cfg.baseUrl ?? 'http://127.0.0.1:11434').replace(/\/$/, '')
+    return `${base}/api/chat`
   }
   if (cfg.provider === 'openai_compatible') {
     return `${cfg.baseUrl?.replace(/\/$/, '')}/chat/completions`
@@ -128,7 +129,7 @@ export function buildSystemPrompt(
   contextChunks: { heading: string; documentTitle: string; body: string; articleId: string }[],
   agentExtra?: string | null
 ): string {
-  const base = `Ты помощник по материалам, импортированным пользователем в приложение LexPatrol (GTA5RP).
+  const base = `Ты помощник по материалам, импортированным пользователем в приложение LexPatrol (локальная база для RP-сценариев).
 Всегда опирайся на приведённый контекст. Если ответа нет в контексте — скажи об этом явно.
 Укажи предупреждение: ответ может быть неточным; проверяй оригинальные статьи.
 Формат ссылок: [ID статьи] в конце предложения при цитировании.`
