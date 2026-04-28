@@ -1,6 +1,6 @@
 {
   "name": "lexpatrol",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "LexPatrol",
   "description": "LexPatrol — справочник норм для госорганизаций GTA5RP (LSPD-style): локальная база, поиск, оверлей поверх игры.",
   "main": "out/main/index.js",

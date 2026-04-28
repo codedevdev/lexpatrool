@@ -3,7 +3,12 @@
  * Табличные вставки (Статья | Расшифровка | Наказание) обрабатываются в tryParseTableRows.
  */
 
-import { parseLeadingArticleRef, type SplitArticle } from './article-split'
+import {
+  expandGluedChapterArticleLines,
+  parseLeadingArticleRef,
+  preprocessForumCodecPlainText,
+  type SplitArticle
+} from './article-split'
 import { logParse, logParseDump, parseTraceVerbose, previewLines } from './parse-trace'
 
 export interface ArticleDisplayMeta {
@@ -41,7 +46,8 @@ function isProseCodecHeadingLine(line: string): boolean {
  * весь документ таблицей (иначе теряется всё до первой строки с `|`).
  */
 export function tryParseTableRows(raw: string): SplitArticle[] | null {
-  const lines = raw.split(/\r?\n/).map((l) => l.trim())
+  const rawExpanded = expandGluedChapterArticleLines(preprocessForumCodecPlainText(raw))
+  const lines = rawExpanded.split(/\r?\n/).map((l) => l.trim())
   const nonEmpty = lines.filter((l) => l && !l.startsWith('#'))
 
   logParse('tryParseTableRows: вход', {

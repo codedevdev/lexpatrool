@@ -2,9 +2,9 @@
  * Выбор стратегии разбиения импортированного текста: таблица (|) или эвристика по строкам.
  */
 
-import { splitIntoArticles, type SplitArticle } from './article-split'
+import { reorderHierarchyArticleBlocks, splitIntoArticles, type SplitArticle } from './article-split'
 import { tryParseTableRows } from './article-enrichment'
-import { logParse, logParseDump, parseTraceVerbose, previewLines } from './parse-trace'
+import { logParse, logParseDump, parseTraceVerbose, previewLines, shouldLogParsePipeline } from './parse-trace'
 
 export function resolveArticleSplits(
   rawText: string,
@@ -22,19 +22,28 @@ export function resolveArticleSplits(
   }
 
   const table = tryParseTableRows(rawText)
-  if (table) {
-    logParse('resolveArticleSplits: итог — режим ТАБЛИЦА (только строки с |)', {
-      blocks: table.length,
-      firstHeadings: table.slice(0, 10).map((s) => s.heading.slice(0, 100))
+  if (shouldLogParsePipeline()) {
+    logParse('resolveArticleSplits: стратегия', {
+      режим: table ? 'ТАБЛИЦА (строки с |)' : 'эвристика splitIntoArticles',
+      препроцесс:
+        'forum plain text: preprocessForumCodecPlainText внутри табличного/строчного разборщика; LEX_PARSE_DIAG=1 — шаги в консоли'
     })
-    return table
+  }
+  if (table) {
+    const ordered = reorderHierarchyArticleBlocks(table)
+    logParse('resolveArticleSplits: итог — режим ТАБЛИЦА (только строки с |)', {
+      blocks: ordered.length,
+      firstHeadings: ordered.slice(0, 10).map((s) => s.heading.slice(0, 100))
+    })
+    return ordered
   }
 
   logParse('resolveArticleSplits: таблица не выбрана → splitIntoArticles (эвристика по строкам)')
-  const out =
+  const rawSplits =
     splitArticles !== false ?
       splitIntoArticles(rawText)
     : [{ articleNumber: null, heading: title, body: rawText }]
+  const out = reorderHierarchyArticleBlocks(rawSplits)
   logParse('resolveArticleSplits: итог — эвристика', {
     blocks: out.length,
     firstHeadings: out.slice(0, 12).map((s) => s.heading.slice(0, 100)),
