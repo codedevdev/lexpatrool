@@ -233,7 +233,7 @@ export function BrowserImportPage(): JSX.Element {
   async function runPicker(field: PickField): Promise<void> {
     const wv = webviewRef.current
     if (!wv) {
-      setNote('Сначала дождитесь загрузки встроенного браузера.')
+      setNote('Дождитесь загрузки страницы во встроенном браузере.')
       return
     }
     setPickBusy(true)
@@ -265,7 +265,7 @@ export function BrowserImportPage(): JSX.Element {
     setNote(null)
     const snap = await getPageSnapshot()
     if (!snap) {
-      setPreviewError('Webview не готов')
+      setPreviewError('Страница ещё загружается или встроенный браузер недоступен.')
       return
     }
     try {
@@ -289,7 +289,7 @@ export function BrowserImportPage(): JSX.Element {
         )) as { ok?: boolean; reason?: string; count?: number }
         if (hl && hl.ok === false) {
           setNote(
-            'Текст разобран как при импорте. Подсветка недоступна: не найден типичный блок XenForo (или страница не форум).'
+            'Текст разобран как при импорте. Подсветка недоступна: не удалось распознать типичную разметку темы форума.'
           )
         } else {
           const n = hl && typeof hl.count === 'number' ? hl.count : 1
@@ -313,7 +313,7 @@ export function BrowserImportPage(): JSX.Element {
     setNote(null)
     const snap = await getPageSnapshot()
     if (!snap) {
-      setPreviewError('Webview не готов')
+      setPreviewError('Страница ещё загружается или встроенный браузер недоступен.')
       return
     }
     if (form.importMode !== 'manual') {
@@ -345,7 +345,7 @@ export function BrowserImportPage(): JSX.Element {
     try {
       const snap = await getPageSnapshot()
       if (!snap) {
-        setNote('Webview не готов')
+        setNote('Страница ещё не готова к импорту.')
         return
       }
       const payload: BrowserImportPayload = {
@@ -417,10 +417,11 @@ export function BrowserImportPage(): JSX.Element {
       <header>
         <h1 className="text-2xl font-semibold text-white">Браузерный импорт</h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-app-muted">
-          Войдите на сайт вручную. <strong className="text-white/90">Авто</strong> — Readability; для XenForo можно
-          взять только первый пост или всю тему (чекбокс ниже). Нажмите «Проверить разбор (авто)», чтобы увидеть блоки
-          и подсветку зоны парсинга. <strong className="text-white/90">Вручную</strong> — CSS или XPath;
-          «Указать на странице» подставляет селектор кликом. Пресеты хранят набор полей.
+          Откройте нужную страницу и войдите на сайт, если требуется. Режим <strong className="text-white/90">Авто</strong>{' '}
+          извлекает основной текст страницы; для тем форума можно взять один пост или всю тему — см. переключатель ниже.
+          «Проверить разбор (авто)» показывает результат и подсветку области. Режим <strong className="text-white/90">Вручную</strong>{' '}
+          задаёт разбор через CSS или XPath; «Указать на странице» подставляет селектор по клику. Наборы полей можно сохранять
+          пресетами.
         </p>
       </header>
 
@@ -434,7 +435,7 @@ export function BrowserImportPage(): JSX.Element {
               checked={form.importMode === 'auto'}
               onChange={() => update('importMode', 'auto')}
             />
-            Авто — Readability + эвристики статей
+            Авто — извлечение основного текста и разбор статей
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-app-muted">
             <input
@@ -480,8 +481,8 @@ export function BrowserImportPage(): JSX.Element {
               </span>
             </label>
             <p className="text-xs leading-relaxed text-app-muted">
-              Тот же путь, что и «Импорт текущей страницы»: если текст с форума длиннее, чем у Readability, подставляется
-              он; иначе — разметка статьи Readability.
+              Если на странице форума найден полный текст темы, он может заменить короткую выдержку «чистой» статьи — в зависимости
+              от того, что длиннее и информативнее.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -620,10 +621,9 @@ export function BrowserImportPage(): JSX.Element {
             ) : (
               <div className="space-y-3 text-sm">
                 <p className="text-xs text-app-muted">
-                  Укажите узел с текстом первого сообщения (например XenForo:{' '}
-                  <code className="rounded bg-black/40 px-1 text-white/90">.message-body .bbWrapper</code> или{' '}
-                  <code className="rounded bg-black/40 px-1 text-white/90">.js-postBody</code>
-                  ). После извлечения текст режется на статьи той же эвристикой, что и в режиме «Авто».
+                  Укажите контейнер с текстом первого сообщения темы (часто это блок тела поста на форуме, например{' '}
+                  <code className="rounded bg-black/40 px-1 text-white/90">.message-body .bbWrapper</code>). Дальше текст
+                  делится на статьи той же логикой, что в режиме «Авто».
                 </p>
                 <FieldRow
                   label="Контейнер"
@@ -685,7 +685,7 @@ export function BrowserImportPage(): JSX.Element {
                           ? 'первый пост (форум)'
                           : autoPreviewInfo.textSource === 'forum_all_posts'
                             ? 'все посты темы (форум)'
-                            : 'Readability'}
+                            : 'основной текст страницы'}
                       </span>
                       {autoPreviewInfo.parsedTitle ? (
                         <span className="text-white/45"> · «{autoPreviewInfo.parsedTitle.slice(0, 48)}»</span>

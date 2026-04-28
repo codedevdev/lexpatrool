@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import brandLogo from '../assets/brand-logo.png'
 
@@ -13,7 +14,41 @@ const nav = [
   { to: '/settings', label: 'Настройки' }
 ]
 
+const DISMISS_UPDATE_KEY = 'lexpatrol-dismiss-update-version'
+
+type UpdateBanner = {
+  currentVersion: string
+  latestVersion: string
+  releaseUrl: string
+  downloadUrl: string
+}
+
 export function AppShell({ children }: { children: ReactNode }): JSX.Element {
+  const [banner, setBanner] = useState<UpdateBanner | null>(null)
+
+  useEffect(() => {
+    const off = window.lawHelper.update.onAvailable((p) => {
+      try {
+        if (localStorage.getItem(DISMISS_UPDATE_KEY) === p.latestVersion) return
+      } catch {
+        /* ignore */
+      }
+      setBanner(p)
+    })
+    return () => off()
+  }, [])
+
+  function dismissBanner(): void {
+    if (banner) {
+      try {
+        localStorage.setItem(DISMISS_UPDATE_KEY, banner.latestVersion)
+      } catch {
+        /* ignore */
+      }
+    }
+    setBanner(null)
+  }
+
   return (
     <div className="min-h-screen bg-canvas text-app selection:bg-accent/25 selection:text-white">
       <div className="flex h-screen">
@@ -29,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             <div className="mt-3 text-xs uppercase tracking-widest text-app-muted">GTA5RP</div>
             <div className="mt-1 text-lg font-semibold tracking-tight text-white">LexPatrol</div>
             <p className="mt-2 text-xs text-app-muted leading-relaxed">
-              Нормы и правила под рукой: импорт, поиск, оверлей для госорганов. Без вмешательства в игру.
+              Локальная база норм и быстрый поиск; оверлей для патруля — отдельное окно поверх игры.
             </p>
           </div>
           <nav className="px-2 pb-4 space-y-1">
@@ -61,8 +96,51 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             </button>
           </div>
         </aside>
-        <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-8">{children}</div>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {banner ? (
+            <div
+              className="shrink-0 border-b border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3 sm:px-8"
+              role="status"
+            >
+              <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 text-sm text-emerald-50/95">
+                  <span className="font-semibold text-white">Доступно обновление LexPatrol</span>{' '}
+                  <span className="text-emerald-100/85">
+                    {banner.currentVersion} → {banner.latestVersion}
+                  </span>
+                  <span className="mt-1 block text-xs text-emerald-100/70">
+                    Скачайте сборку со страницы релиза, если доверяете источнику.
+                  </span>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-white/15 bg-white/[0.08] px-3 py-1.5 text-xs font-medium text-white hover:bg-white/[0.12]"
+                    onClick={() => window.lawHelper.shell.openExternal(banner.releaseUrl)}
+                  >
+                    Страница релиза
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-emerald-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+                    onClick={() => window.lawHelper.shell.openExternal(banner.downloadUrl)}
+                  >
+                    Скачать файл
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-emerald-100/90 hover:bg-white/[0.06]"
+                    onClick={() => dismissBanner()}
+                  >
+                    Позже
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-8">{children}</div>
+          </div>
         </main>
       </div>
     </div>

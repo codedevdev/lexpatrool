@@ -113,9 +113,10 @@ export function AiPage(): JSX.Element {
       <header>
         <h1 className="text-2xl font-semibold text-white">ИИ-ассистент</h1>
         <p className="mt-2 text-sm text-app-muted max-w-3xl">
-          Базовый провайдер задаёт ключ по умолчанию. <strong className="text-app">Свои агенты</strong> задают роль
-          (например, сотрудник LSPD в Los Santos) и доп. инструкции; при необходимости переопределяют модель/URL/ключ.
-          Ответы только по импортированной базе (FTS). ИИ может ошибаться — сверяйтесь с оригиналом.
+          Базовый провайдер хранит ключ и параметры по умолчанию. <strong className="text-app">Агенты</strong> задают роль и
+          дополнительные инструкции (например, ответ от лица сотрудника LSPD); при необходимости у них свой ключ, модель или
+          адрес API. Ответы строятся по текстам из вашей локальной базы; перед решениями сверяйтесь с читателем — модель может
+          ошибаться.
         </p>
       </header>
 
@@ -169,7 +170,7 @@ export function AiPage(): JSX.Element {
             checked={Boolean(cfg.allowBroaderContext)}
             onChange={(e) => setCfg({ ...cfg, allowBroaderContext: e.target.checked })}
           />
-          Разрешить общие пояснения вне импортированного текста
+          Разрешить общие пояснения помимо цитат из базы
         </label>
         <button
           type="button"

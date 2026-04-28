@@ -32,7 +32,15 @@ export function initDatabase(): Database.Database {
   db.pragma('foreign_keys = ON')
   applyMigrations(db)
   seedIfEmpty(db)
+  cleanupOrphanSources(db)
   return db
+}
+
+/** Записи импорта без документа оставались после удаления документов (до исправления каскада). */
+function cleanupOrphanSources(instance: Database.Database): void {
+  instance.prepare(
+    `DELETE FROM sources WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.source_id = sources.id)`
+  ).run()
 }
 
 function applyMigrations(instance: Database.Database): void {

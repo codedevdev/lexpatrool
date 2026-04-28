@@ -1,4 +1,4 @@
-import { ipcMain, dialog, globalShortcut } from 'electron'
+import { app, ipcMain, dialog, globalShortcut } from 'electron'
 import { setMainWindowAlwaysOnTop } from '../window-always-on-top'
 import type { BrowserWindow } from 'electron'
 import { writeFileSync } from 'fs'
@@ -54,7 +54,7 @@ import { splitIntoArticles, isPartHeading, type SplitArticle } from '../../parse
 import { stripRedundantLeadingNumber } from '../../shared/article-display'
 import { enrichArticle, metaToJson } from '../../parsers/article-enrichment'
 import { logParse, logParseDump, parseTraceVerbose } from '../../parsers/parse-trace'
-import { retrieveChunksForQuery } from '../../services/retrieval'
+import { retrieveChunksForQuery, snippetForArticleBody } from '../../services/retrieval'
 import {
   buildSystemPrompt,
   completeChat,
@@ -72,6 +72,7 @@ import {
   type HotkeyConfig
 } from '../global-shortcuts'
 import { seedIfEmpty } from '../seed'
+import { checkForUpdates, getUpdateRepoLabel } from '../update-check'
 
 export interface IpcContext {
   getMainWindow: () => BrowserWindow | null
@@ -159,9 +160,12 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   const { getDb, overlay, getMainWindow } = ctx
 
   ipcMain.handle('app:get-version', async () => {
-    const { app } = await import('electron')
     return app.getVersion()
   })
+
+  ipcMain.handle('update:check', async () => checkForUpdates(app.getVersion()))
+
+  ipcMain.handle('update:repo-label', async () => getUpdateRepoLabel())
 
   ipcMain.handle('db:backup', async () => {
     const win = ctx.getMainWindow()
@@ -244,6 +248,13 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       .all()
   })
 
+  ipcMain.handle('stats:summary', () => {
+    const db = getDb()
+    const documents = db.prepare('SELECT COUNT(*) AS c FROM documents').get() as { c: number }
+    const articles = db.prepare('SELECT COUNT(*) AS c FROM articles').get() as { c: number }
+    return { documentCount: documents.c, articleCount: articles.c }
+  })
+
   ipcMain.handle('documents:list', () => {
     return getDb()
       .prepare(
@@ -285,8 +296,22 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   })
 
   ipcMain.handle('document:delete', (_e, id: string) => {
-    const r = getDb().prepare('DELETE FROM documents WHERE id = ?').run(id)
-    return { ok: r.changes > 0 }
+    const db = getDb()
+    const row = db.prepare('SELECT source_id FROM documents WHERE id = ?').get(id) as
+      | { source_id: string | null }
+      | undefined
+    const del = db.transaction(() => {
+      const r = db.prepare('DELETE FROM documents WHERE id = ?').run(id)
+      if (r.changes === 0) return false
+      if (row?.source_id) {
+        const left = db.prepare('SELECT COUNT(*) AS c FROM documents WHERE source_id = ?').get(row.source_id) as {
+          c: number
+        }
+        if (left.c === 0) db.prepare('DELETE FROM sources WHERE id = ?').run(row.source_id)
+      }
+      return true
+    })()
+    return { ok: del }
   })
 
   ipcMain.handle('article:update', (_e, payload: ArticleUpdatePayload) => {
@@ -356,7 +381,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       document_title: c.documentTitle,
       heading: c.heading,
       article_number: c.articleNumber,
-      snippet: c.body.slice(0, 280),
+      snippet: snippetForArticleBody(c.body, q),
       rank: i
     }))
   })

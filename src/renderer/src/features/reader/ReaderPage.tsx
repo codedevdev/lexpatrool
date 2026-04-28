@@ -512,7 +512,7 @@ export function ReaderPage(): JSX.Element {
         </div>
         {articles.length === 0 ? (
           <p className="mt-4 text-sm leading-relaxed text-app-muted">
-            В этом документе пока нет статей. Импортируйте текст с разбивкой на статьи или добавьте материал заново.
+            В документе пока нет статей — выполните импорт с разбивкой на статьи или создайте документ заново.
           </p>
         ) : (
           <div className="mt-4 space-y-0.5">
@@ -710,7 +710,7 @@ export function ReaderPage(): JSX.Element {
           {active && !articleEdit ? (
             highlight(active.body_clean)
           ) : !active && articles.length === 0 ? (
-            <p className="text-app-muted">Импортируйте текст с разбивкой на статьи или откройте другой документ в базе.</p>
+            <p className="text-app-muted">Импортируйте материал с разбивкой на статьи или откройте другой документ в базе знаний.</p>
           ) : !active ? (
             <p className="text-app-muted">Выберите статью в списке слева.</p>
           ) : null}

@@ -11,6 +11,33 @@ import type {
 
 const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
+  update: {
+    check: (): Promise<{
+      currentVersion: string
+      status: 'latest' | 'available' | 'error' | 'skipped'
+      latestVersion?: string
+      releaseUrl?: string
+      downloadUrl?: string
+      publishedAt?: string
+      message?: string
+    }> => ipcRenderer.invoke('update:check'),
+    repoLabel: (): Promise<string> => ipcRenderer.invoke('update:repo-label'),
+    onAvailable: (
+      cb: (p: {
+        currentVersion: string
+        latestVersion: string
+        releaseUrl: string
+        downloadUrl: string
+      }) => void
+    ): (() => void) => {
+      const handler = (
+        _: unknown,
+        p: { currentVersion: string; latestVersion: string; releaseUrl: string; downloadUrl: string }
+      ): void => cb(p)
+      ipcRenderer.on('app:update-available', handler)
+      return () => ipcRenderer.removeListener('app:update-available', handler)
+    }
+  },
   mainWindow: {
     setAlwaysOnTop: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('window:set-always-on-top', enabled)
   },
@@ -66,6 +93,10 @@ const api = {
   },
   categories: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('categories:list')
+  },
+  stats: {
+    summary: (): Promise<{ documentCount: number; articleCount: number }> =>
+      ipcRenderer.invoke('stats:summary')
   },
   sources: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('sources:list')

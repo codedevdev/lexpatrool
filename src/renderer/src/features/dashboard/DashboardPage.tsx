@@ -3,15 +3,16 @@ import { Link } from 'react-router-dom'
 
 export function DashboardPage(): JSX.Element {
   const [version, setVersion] = useState<string>('')
-  const [counts, setCounts] = useState({ docs: 0, sources: 0 })
+  const [counts, setCounts] = useState({ documents: 0, articles: 0 })
+  const [statsLoading, setStatsLoading] = useState(true)
 
   useEffect(() => {
     void window.lawHelper.getVersion().then(setVersion)
-    void Promise.all([window.lawHelper.documents.list(), window.lawHelper.sources.list()]).then(
-      ([d, s]) => {
-        setCounts({ docs: (d as unknown[]).length, sources: (s as unknown[]).length })
-      }
-    )
+    void window.lawHelper.stats
+      .summary()
+      .then((s) => setCounts({ documents: s.documentCount, articles: s.articleCount }))
+      .catch(() => setCounts({ documents: 0, articles: 0 }))
+      .finally(() => setStatsLoading(false))
   }, [])
 
   return (
@@ -21,25 +22,38 @@ export function DashboardPage(): JSX.Element {
           LexPatrol <span className="text-base font-normal text-app-muted">— обзор</span>
         </h1>
         <p className="mt-2 text-sm text-app-muted max-w-2xl leading-relaxed">
-          Справочник для <strong className="text-app/95">государственных организаций</strong> на GTA5RP-серверах
-          (полиция Los Santos, шериф, EMS, госструктуры — как настроите сами). Импортируйте правила с форума,
-          ищите по базе, закрепляйте статьи на оверлее. Окно поверх игры —{' '}
-          <strong className="text-app/95">без инъекций</strong> в GTA5.
+          Справочник по правилам вашего сервера для роли в{' '}
+          <strong className="text-app/95">государственных организациях</strong> (полиция Los Santos, шериф, EMS и другие
+          структуры — по вашему сценарию). Импортируйте тексты, ищите по базе, закрепляйте статьи в отдельном окне оверлея
+          поверх игры — это обычное окно Windows, не модификация клиента GTA5.
         </p>
       </header>
 
       <section className="grid gap-4 md:grid-cols-3">
         <div className="glass rounded-2xl p-5">
           <div className="text-xs uppercase tracking-wide text-app-muted">Документы</div>
-          <div className="mt-2 text-3xl font-semibold text-white">{counts.docs}</div>
+          <div className="mt-2 text-3xl font-semibold text-white">
+            {statsLoading ? '…' : counts.documents}
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-app-muted">
+            Импортированные материалы; каждый документ — отдельная единица в базе.
+          </p>
         </div>
         <div className="glass rounded-2xl p-5">
-          <div className="text-xs uppercase tracking-wide text-app-muted">Источники</div>
-          <div className="mt-2 text-3xl font-semibold text-white">{counts.sources}</div>
+          <div className="text-xs uppercase tracking-wide text-app-muted">Статьи</div>
+          <div className="mt-2 text-3xl font-semibold text-white">
+            {statsLoading ? '…' : counts.articles}
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-app-muted">
+            Пункты после разбивки документов — по ним работают поиск и оверлей.
+          </p>
         </div>
         <div className="glass rounded-2xl p-5">
-          <div className="text-xs uppercase tracking-wide text-app-muted">Версия</div>
+          <div className="text-xs uppercase tracking-wide text-app-muted">Версия приложения</div>
           <div className="mt-2 text-lg font-mono text-white">{version || '…'}</div>
+          <p className="mt-2 text-[11px] leading-snug text-app-muted">
+            Номер текущей установленной сборки.
+          </p>
         </div>
       </section>
 

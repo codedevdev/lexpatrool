@@ -11,3 +11,6 @@ Thumbs.db
 *.p12
 signing.env
 LexPatrool-bin/
+
+# Генерируется перед electron-builder (npm run build:win)
+build/icon.ico

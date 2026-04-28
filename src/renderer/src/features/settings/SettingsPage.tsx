@@ -17,6 +17,18 @@ export function SettingsPage(): JSX.Element {
     clickThrough: 'Ctrl+Shift+G'
   })
   const [hkRecording, setHkRecording] = useState<HotkeyField | null>(null)
+  const [appVersion, setAppVersion] = useState('')
+  const [updateRepo, setUpdateRepo] = useState('')
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<string | null>(null)
+  const [updateResult, setUpdateResult] = useState<Awaited<ReturnType<typeof window.lawHelper.update.check>> | null>(
+    null
+  )
+
+  useEffect(() => {
+    void window.lawHelper.getVersion().then(setAppVersion)
+    void window.lawHelper.update.repoLabel().then(setUpdateRepo)
+  }, [])
 
   useEffect(() => {
     void window.lawHelper.hotkeys
@@ -99,22 +111,113 @@ export function SettingsPage(): JSX.Element {
     }
   }
 
+  async function checkUpdatesManual(): Promise<void> {
+    setUpdateBusy(true)
+    setUpdateInfo(null)
+    setUpdateResult(null)
+    try {
+      const r = await window.lawHelper.update.check()
+      setUpdateResult(r)
+      if (r.status === 'latest') {
+        setUpdateInfo(r.message ?? 'У вас установлена последняя доступная версия.')
+      } else if (r.status === 'available') {
+        setUpdateInfo(
+          `Доступна версия ${r.latestVersion}. Установщик берите со страницы релиза; при желании сверьте контрольную сумму в блоке файлов.`
+        )
+      } else if (r.status === 'skipped') {
+        setUpdateInfo(r.message ?? 'Проверка отключена.')
+      } else {
+        setUpdateInfo(r.message ?? 'Не удалось связаться с GitHub. Проверьте интернет или попробуйте позже.')
+      }
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-2xl font-semibold text-white">Настройки</h1>
         <p className="mt-2 max-w-2xl text-sm text-app-muted leading-relaxed">
-          Управление оверлеем и резервными копиями. Горячие клавиши работают глобально (когда LexPatrol запущен).
+          Горячие клавиши, окно оверлея, проверка обновлений и резервное копирование базы. Сочетания действуют по всей системе,
+          пока запущен LexPatrol.
         </p>
       </header>
+
+      <section className="glass space-y-3 rounded-2xl p-6">
+        <h2 className="text-sm font-semibold text-white">Что здесь настраивается</h2>
+        <ul className="list-inside list-disc space-y-2 text-xs leading-relaxed text-app-muted">
+          <li>
+            <span className="text-white/85">Обновления</span> — ручная проверка новой сборки на GitHub и переход к странице релиза
+            или файлу установки.
+          </li>
+          <li>
+            <span className="text-white/85">Горячие клавиши</span> — три действия по всей системе (оверлей, поиск по базе, режим
+            «мышь в игру»); в самом оверлее — Esc и стрелки для закреплённых статей (см. таблицу в разделе ниже).
+          </li>
+          <li>
+            <span className="text-white/85">Окна поверх других</span> — отдельно для главного окна и для оверлея; при необходимости
+            поднимите уровень оверлея, если его перекрывают другие программы.
+          </li>
+          <li>
+            <span className="text-white/85">Оверлей</span> — прозрачность, пропуск кликов в игру, показ / скрытие и вывод «поверх
+            всех окон»; те же параметры можно менять на панели оверлея — они синхронизированы.
+          </li>
+          <li>
+            <span className="text-white/85">Резервная копия</span> — экспорт базы в файл в конце страницы; сохраните перед переездом
+            на другой ПК или переустановкой приложения.
+          </li>
+        </ul>
+      </section>
+
+      <section className="glass space-y-4 rounded-2xl p-6">
+        <h2 className="text-sm font-semibold text-white">Обновления</h2>
+        <p className="text-xs leading-relaxed text-app-muted">
+          Текущая версия: <span className="font-mono text-white/90">{appVersion || '…'}</span>. Обновления проверяются по
+          официальным релизам на{' '}
+          <span className="font-mono text-white/80">github.com/{updateRepo || '…'}</span>. Установочный файл скачивается с
+          страницы релиза; наличие подписи зависит от настроек сборки.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={updateBusy}
+            onClick={() => void checkUpdatesManual()}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dim disabled:opacity-50"
+          >
+            {updateBusy ? 'Проверка…' : 'Проверить обновления'}
+          </button>
+          {updateResult?.status === 'available' && updateResult.releaseUrl ? (
+            <>
+              <button
+                type="button"
+                className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/[0.06]"
+                onClick={() => window.lawHelper.shell.openExternal(updateResult.releaseUrl!)}
+              >
+                Открыть релиз на GitHub
+              </button>
+              {updateResult.downloadUrl ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100 hover:bg-emerald-500/20"
+                  onClick={() => window.lawHelper.shell.openExternal(updateResult.downloadUrl!)}
+                >
+                  Перейти к скачиванию
+                </button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+        {updateInfo ? <p className="text-sm text-app-muted">{updateInfo}</p> : null}
+      </section>
 
       <section className="glass space-y-4 rounded-2xl p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-white">Горячие клавиши</h2>
             <p className="mt-1 max-w-xl text-xs text-app-muted">
-              Глобальные сочетания (работают, пока запущен LexPatrol). Нужны модификаторы (Ctrl/Alt/Shift). Нажмите
-              «Изменить», затем новое сочетание; Esc — отмена записи. Три действия не должны совпадать.
+              Действуют во всей системе, пока LexPatrol запущен. Задайте Ctrl/Alt/Shift и клавишу; Esc во время записи —
+              отмена. У каждого действия своё сочетание.
             </p>
           </div>
           <button
@@ -182,10 +285,9 @@ export function SettingsPage(): JSX.Element {
       <section className="glass space-y-4 rounded-2xl p-6">
         <h2 className="text-sm font-semibold text-white">Окна: поверх других</h2>
         <p className="text-xs text-app-muted">
-          Главное окно и оверлей настраиваются отдельно. У оверлея — уровень «поверх» (Electron{' '}
-          <span className="font-mono text-white/70">setAlwaysOnTop</span>). Если что-то всё равно перекрывает — выберите
-          «Выше» или «Максимально». Полноэкранный <span className="text-white/70">exclusive</span> режим игры (DirectX)
-          часто рисует поверх всех окон ОС — тогда без режима «в окне»/borderless подсказка не поможет.
+          Главное окно и оверлей настраиваются отдельно. Для оверлея можно повысить приоритет отображения, если его перекрывают
+          другие программы. В полноэкранном режиме игры с захватом экрана Windows может не показывать окна поверх — тогда
+          используйте оконный или безрамочный режим игры.
         </p>
         <label className="flex items-center gap-2 text-sm text-app-muted">
           <input
@@ -216,8 +318,8 @@ export function SettingsPage(): JSX.Element {
       <section className="glass space-y-4 rounded-2xl p-6">
         <h2 className="text-sm font-semibold text-white">Оверлей (синхрон с главным окном)</h2>
         <p className="text-xs text-app-muted">
-          Прозрачность и «клик сквозь» синхронны с панелью оверлея.           На самой панели есть переключатели «В оверлей» / «В игру» и назначаемая глобальная клавиша ({hkDisplay.clickThrough}
-          ).
+          Прозрачность и режим «клики проходят в игру» совпадают с панелью оверлея. Там же переключатель «В оверлей» / «В игру»
+          и горячая клавиша ({hkDisplay.clickThrough}).
         </p>
         <label className="block space-y-2 text-xs text-app-muted">
           Прозрачность
@@ -260,33 +362,11 @@ export function SettingsPage(): JSX.Element {
         </div>
       </section>
 
-      <section className="glass space-y-3 rounded-2xl p-6">
-        <h2 className="text-sm font-semibold text-white">Установка и предупреждения Windows</h2>
-        <p className="text-xs leading-relaxed text-app-muted">
-          Без платной цифровой подписи Microsoft часто показывает SmartScreen — это нормально для новых программ. Полностью
-          убрать окно без сертификата нельзя, но можно реже сталкиваться с лишними шагами.
-        </p>
-        <ul className="list-inside list-disc space-y-2 text-xs leading-relaxed text-app-muted">
-          <li>
-            <span className="text-white/85">Скачали из браузера:</span> ПКМ по установщику → Свойства → вкладка «Общие»
-            → при наличии включите «Разблокировать» → ОК. Так снимается метка «из интернета» и иногда меньше вопросов от
-            системы.
-          </li>
-          <li>
-            <span className="text-white/85">Синее окно SmartScreen:</span> «Подробнее» → «Выполнить в любом случае» — если
-            вы доверяете источнику сборки.
-          </li>
-          <li>
-            Установщик по умолчанию ставит приложение для{' '}
-            <span className="text-white/75">текущего пользователя</span> без запроса прав администратора (меньше пар UAC).
-            Если вручную указать папку в Program Files, Windows может запросить повышение прав отдельно.
-          </li>
-        </ul>
-      </section>
-
       <section className="glass space-y-4 rounded-2xl p-6">
         <h2 className="text-sm font-semibold text-white">Резервное копирование</h2>
-        <p className="text-sm text-app-muted">Экспорт JSON со всеми таблицами для переноса на другой ПК.</p>
+        <p className="text-sm text-app-muted">
+          Сохраните копию базы в файл для переноса на другой компьютер или резервной архивации.
+        </p>
         <button
           type="button"
           onClick={() => void backup()}

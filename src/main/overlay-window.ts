@@ -83,7 +83,7 @@ function writeBounds(db: Database, bounds: Bounds): void {
   ).run(BOUNDS_KEY, JSON.stringify(bounds))
 }
 
-/** Always-on-top helper overlay — separate OS window (no game injection). */
+/** Оверлей: отдельное окно поверх других; не встраивается в процесс игры. */
 export class OverlayController {
   private win: BrowserWindow | null = null
   private clickThrough = false

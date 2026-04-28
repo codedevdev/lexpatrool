@@ -7,6 +7,7 @@ import { setMainWindowAlwaysOnTop } from './window-always-on-top'
 import { resolveAppIconPath, resolveSplashHtmlPath } from './app-resources'
 import { applyOverlayGlobalShortcuts } from './global-shortcuts'
 import { destroyTray, isAppQuitting, setupSystemTray } from './system-tray'
+import { scheduleStartupUpdateCheck } from './update-check'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
@@ -239,6 +240,8 @@ app.whenReady().then(() => {
   })
 
   applyOverlayGlobalShortcuts(overlay, getDb)
+
+  scheduleStartupUpdateCheck(() => mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow()

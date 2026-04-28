@@ -1,15 +1,15 @@
 {
   "name": "lexpatrol",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "LexPatrol",
-  "description": "LexPatrol — справочник норм и правил для гос. организаций GTA5RP (LSPD-style): импорт, поиск, оверлей. Без инъекций в игру.",
+  "description": "LexPatrol — справочник норм для госорганизаций GTA5RP (LSPD-style): локальная база, поиск, оверлей поверх игры.",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
     "dev:clean": "node -e \"try{require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})}catch(e){}\" && electron-vite dev",
     "build": "electron-vite build",
-    "build:win": "electron-vite build && electron-builder --win",
+    "build:win": "electron-vite build && node scripts/gen-windows-icon.mjs && electron-builder --win",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
@@ -37,6 +37,7 @@
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "png-to-ico": "^3.0.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3",
@@ -46,7 +47,7 @@
     "appId": "io.lexpatrol.desktop",
     "productName": "LexPatrol",
     "copyright": "Copyright © LexPatrol",
-    "icon": "build/app-icon.png",
+    "icon": "resources/app-icon.png",
     "directories": {
       "output": "LexPatrool-bin"
     },
@@ -72,6 +73,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -87,10 +89,11 @@
         }
       ],
       "verifyUpdateCodeSignature": false,
-      "signDlls": false,
-      "signAndEditExecutable": false
+      "signDlls": false
     },
     "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "allowElevation": false,

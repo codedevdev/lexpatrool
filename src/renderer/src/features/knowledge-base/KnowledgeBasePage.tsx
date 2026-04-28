@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { extractSearchTokens } from '@shared/search-tokens'
 
 /** Строка из query — стабильная зависимость, без лишних синков при смене объекта searchParams. */
 function useSearchQueryParam(key: string): string {
@@ -59,8 +60,15 @@ export function KnowledgeBasePage(): JSX.Element {
 
   const filtered = useMemo(() => {
     if (!q.trim()) return docs
-    const s = q.toLowerCase()
-    return docs.filter((d) => d.title.toLowerCase().includes(s))
+    const tokens = extractSearchTokens(q)
+    if (!tokens.length) {
+      const s = q.trim().toLowerCase()
+      return docs.filter((d) => d.title.toLowerCase().includes(s))
+    }
+    return docs.filter((d) => {
+      const t = d.title.toLowerCase()
+      return tokens.some((tok) => t.includes(tok.toLowerCase()))
+    })
   }, [docs, q])
 
   async function removeDoc(id: string, title: string): Promise<void> {
@@ -77,7 +85,9 @@ export function KnowledgeBasePage(): JSX.Element {
       <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-white">База знаний</h1>
-          <p className="mt-2 text-sm text-app-muted">Полнотекстовый поиск (FTS5) по импортированным статьям.</p>
+          <p className="mt-2 text-sm text-app-muted">
+            Поиск по заголовкам и полному тексту статей, которые вы добавили в базу.
+          </p>
         </div>
         <input
           className="w-full max-w-md rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-sm text-white outline-none focus:border-accent md:w-80"

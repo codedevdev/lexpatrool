@@ -158,14 +158,14 @@ export function NotesPage(): JSX.Element {
       <header>
         <h1 className="text-2xl font-semibold text-white">Заметки и закладки</h1>
         <p className="mt-2 max-w-2xl text-sm text-app-muted leading-relaxed">
-          Закладки по статьям из базы и свободные текстовые заметки. Привязка к статье опциональна — удобно для сценариев и
-          напоминаний по конкретному пункту кодекса.
+          Избранные статьи из базы и текстовые заметки. К заметке можно привязать статью — чтобы не искать формулировку во время
+          смены.
         </p>
       </header>
 
       <section className="glass rounded-2xl p-6">
         <h2 className="text-sm font-semibold text-white">Закладки</h2>
-        <p className="mt-1 text-xs text-app-muted">Статьи, отмеченные в интерфейсе как избранные (таблица bookmarks).</p>
+        <p className="mt-1 text-xs text-app-muted">Статьи, которые вы добавили в избранное в читателе или в базе знаний.</p>
         {loading ? (
           <p className="mt-4 text-sm text-app-muted">Загрузка…</p>
         ) : bookmarks.length === 0 ? (

@@ -27,6 +27,26 @@ declare global {
   interface Window {
     lawHelper: {
       getVersion: () => Promise<string>
+      update: {
+        check: () => Promise<{
+          currentVersion: string
+          status: 'latest' | 'available' | 'error' | 'skipped'
+          latestVersion?: string
+          releaseUrl?: string
+          downloadUrl?: string
+          publishedAt?: string
+          message?: string
+        }>
+        repoLabel: () => Promise<string>
+        onAvailable: (
+          cb: (p: {
+            currentVersion: string
+            latestVersion: string
+            releaseUrl: string
+            downloadUrl: string
+          }) => void
+        ) => () => void
+      }
       mainWindow: { setAlwaysOnTop: (enabled: boolean) => Promise<boolean> }
       openReader: (documentId: string, articleId?: string) => Promise<{ ok: boolean }>
       onOpenReader: (cb: (payload: { documentId: string; articleId?: string }) => void) => () => void
@@ -70,6 +90,9 @@ declare global {
         remove: (articleId: string) => Promise<{ ok: boolean }>
       }
       categories: { list: () => Promise<unknown[]> }
+      stats: {
+        summary: () => Promise<{ documentCount: number; articleCount: number }>
+      }
       sources: { list: () => Promise<unknown[]> }
       documents: {
         list: () => Promise<unknown[]>
