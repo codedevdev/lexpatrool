@@ -179,7 +179,11 @@ export class OverlayController {
     this.win.on('move', () => this.schedulePersistBounds())
     this.win.on('resize', () => this.schedulePersistBounds())
 
-    this.win.on('show', () => olog('event: show'))
+    this.win.on('show', () => {
+      olog('event: show')
+      /** Синхронизация закрепов с БД при каждом показе — если ipc «pins-updated» пришёл до готовности React, список не потеряется. */
+      this.send('overlay:pins-updated')
+    })
     this.win.on('hide', () => olog('event: hide'))
     this.win.once('ready-to-show', () => olog('event: ready-to-show (window)'))
 
