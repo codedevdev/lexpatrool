@@ -60,6 +60,21 @@ export function isStructuralHeadingLine(line: string): boolean {
   return /^(?:Раздел|Статья|Часть|Глава|§|Article)\b/i.test(line.trim())
 }
 
+/** Заголовок основной статьи кодекса («Статья 3. …»), не подпункт списка. */
+function isStatyaHeadingLine(heading: string): boolean {
+  const h = heading.trimStart().slice(0, 160)
+  return /^(?:Статья|статья|ст\.)\s*[\d.]+/i.test(h)
+}
+
+/**
+ * Подпункт перечисления «2) Текст» или «4)Текст» (иногда без пробела после «)» в копипасте).
+ * Такие строки не должны начинать новый блок, если они идут сразу под «Статья N.» (справочные статьи без таблицы санкций).
+ */
+function isClosingParenEnumLine(line: string): boolean {
+  const t = line.trimStart()
+  return /^\d+\)\s*\S/.test(t)
+}
+
 /** Lines that likely start a new block (article / section / numbered clause). */
 function isBlockStart(line: string): boolean {
   const t = line.trim()
@@ -459,6 +474,17 @@ export function splitIntoArticles(raw: string): SplitArticle[] {
 
     const starts = isBlockStart(trimmed)
     const cont = isContinuationLine(prevNonEmpty, trimmed)
+
+    const statyaEnumContinuation =
+      current !== null &&
+      isStatyaHeadingLine(current.heading) &&
+      isClosingParenEnumLine(trimmed)
+
+    if (statyaEnumContinuation) {
+      current.body += `${trimmed}\n`
+      prevNonEmpty = trimmed
+      continue
+    }
 
     if (starts && !cont) {
       flush()

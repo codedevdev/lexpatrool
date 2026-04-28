@@ -308,7 +308,8 @@ export class OverlayController {
   /** Прозрачное окно до первого кадра = полностью невидимо; ждём отрисовки. */
   private reveal(w: BrowserWindow): void {
     if (w.isDestroyed()) return
-    const loading = w.webContents.isLoading()
+    const wc = w.webContents
+    const loading = wc.isLoading()
     olog('reveal()', { loading, visible: w.isVisible(), opacity: w.getOpacity() })
 
     let done = false
@@ -343,17 +344,23 @@ export class OverlayController {
       }
     }, 8000)
 
+    /**
+     * Без «догоняющих» путей бывает гонка: `isLoading() === true`, а `ready-to-show` / `did-finish-load` уже
+     * прошли до подписки — окно остаётся скрытым до таймаута 8 с. Слушаем оба события + микротаск/таймер.
+     */
+    w.once('ready-to-show', () => go('ready-to-show'))
     if (loading) {
-      w.once('ready-to-show', () => go('ready-to-show'))
-      w.webContents.once('did-finish-load', () => {
-        olog('reveal: did-finish-load branch (microtask fallback)')
-        queueMicrotask(() => {
-          if (!done && !w.isDestroyed() && !w.isVisible()) go('did-finish-load-fallback')
-        })
+      wc.once('did-finish-load', () => {
+        olog('reveal: did-finish-load')
+        queueMicrotask(() => go('did-finish-load'))
       })
     } else {
-      go('not-loading-immediate')
+      queueMicrotask(() => go('already-not-loading'))
     }
+    setTimeout(() => {
+      if (done || w.isDestroyed() || w.isVisible()) return
+      if (!wc.isLoading()) go('deferred-not-loading')
+    }, 0)
   }
 
   private applyTopZOrder(w: BrowserWindow): void {
@@ -427,7 +434,7 @@ export class OverlayController {
     return db
       .prepare(
         `SELECT a.id, a.heading, a.article_number, a.body_clean, a.summary_short, a.penalty_hint, a.display_meta_json,
-                d.id AS document_id, d.title AS document_title, p.sort_order
+                d.id AS document_id, d.title AS document_title, d.article_import_filter AS document_article_import_filter, p.sort_order
          FROM overlay_pins p
          JOIN articles a ON a.id = p.article_id
          JOIN documents d ON d.id = a.document_id

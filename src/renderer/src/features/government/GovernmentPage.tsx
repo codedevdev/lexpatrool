@@ -2,15 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 /**
- * Хаб для роли в государственных службах в RP (полиция, шериф, EMS и т.д.).
- * Конкретный лор и документы задаются пользователем; приложение не привязано к серверу или издателю игры.
+ * Раздел быстрого доступа к нормам для роли (полиция, EMS и др.). UI: «На посту». Маршрут /patrol; редиректы с /government и /mvd.
  */
 
 export const DEFAULT_QUICK_SEARCH_PRESETS: { label: string; q: string }[] = [
   { label: 'Задержание / арест', q: 'задержание арест Miranda' },
   { label: 'Кодексы / штрафы', q: 'штраф кодекс' },
   { label: 'Обыск / изъятие', q: 'обыск изъятие' },
-  { label: 'Дорога / патруль', q: 'патруль транспорт' },
+  { label: 'Дорога / выезд', q: 'патруль транспорт' },
   { label: 'Оружие', q: 'оружие ношение' },
   { label: 'EMS / мед. помощь', q: 'медицинская помощь EMS' }
 ]
@@ -48,10 +47,22 @@ function parseStoredPresets(json: string | null): { label: string; q: string }[]
 type DraftRow = { id: string; label: string; q: string }
 
 const REMINDERS = [
-  'Справочник показывает только те документы, которые вы добавили в LexPatrol.',
-  'Перед серьёзным решением или репортом откройте формулировку в читателе и убедитесь в тексте первоисточника.',
-  'Набор кодексов и уставов определяется вашим сервером — при изменении правил обновите импорт.',
-  'В режиме «фокус» на оверлее выделяются положения о санкциях и штрафах — удобно в патруле.'
+  {
+    title: 'Только ваша база',
+    text: 'LexPatrol ищет по документам, которые вы сами импортировали. Пустой результат — не «баг», а отсутствие текста в базе.'
+  },
+  {
+    title: 'Сверка с первоисточником',
+    text: 'Перед репортом, наказанием в роли или спором в OOC откройте статью в читателе и прочитайте формулировку дословно.'
+  },
+  {
+    title: 'Правила сервера меняются',
+    text: 'Если администрация обновила уставы или кодексы — заново импортируйте актуальные версии.'
+  },
+  {
+    title: 'Оверлей в фокусе',
+    text: 'Режим «Фокус» на оверлее подсвечивает санкции и штрафы — удобно не листать длинный текст в игре.'
+  }
 ]
 
 export function GovernmentPage(): JSX.Element {
@@ -61,9 +72,21 @@ export function GovernmentPage(): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<DraftRow[]>([])
   const [saveHint, setSaveHint] = useState<string | null>(null)
+  const [hkDisp, setHkDisp] = useState({
+    toggle: 'Ctrl+Shift+Space',
+    search: 'Ctrl+Shift+F',
+    clickThrough: 'Ctrl+Shift+G'
+  })
 
   useEffect(() => {
     void window.lawHelper.stats.summary().then((s) => setStats({ docs: s.documentCount, articles: s.articleCount }))
+  }, [])
+
+  useEffect(() => {
+    void window.lawHelper.hotkeys
+      .get()
+      .then((h) => setHkDisp(h.display))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -139,30 +162,98 @@ export function GovernmentPage(): JSX.Element {
   }, [])
 
   return (
-    <div className="space-y-10">
-      <header className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-surface-raised/90 via-[#12151c] to-[#0d1118] p-8 shadow-glass">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-accent/10 blur-3xl" />
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/90">LexPatrol</p>
-        <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-accent/85">Государственные службы · RP</p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">Справочник для госорганов</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-app-muted">
-          Здесь собраны <strong className="text-app/90">ваши</strong> импортированные законы, уставы и приказы. Обычно это
-          роль полиции, шерифа, EMS и других структур; названия, города и лор — из правил <strong className="text-white/90">вашего</strong> сервера
-          и тех документов, что вы загрузили.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-3 text-xs text-app-muted">
-          <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1">Документов: {stats.docs}</span>
-          <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1">Статей: {stats.articles}</span>
+    <div className="space-y-8">
+      <header className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-gradient-to-br from-[#101522]/95 via-[#0c111a]/92 to-[#080c12]/95 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.05)] md:p-8">
+        <div className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-accent/10 blur-3xl" />
+        <div className="relative">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/80">Нормы для роли</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">На посту</h1>
+          <p className="mt-3 max-w-3xl text-sm leading-relaxed text-app-muted">
+            Здесь — <strong className="text-white/90">к работе в характере</strong> службы: закрепите нужное в базе, доберитесь до
+            формулировки одним кликом, выведите материал в оверлей. Подходит полиции, EMS, пожарным и любой госслужбе на вашем
+            сервере — что именно читать, задаёт <strong className="text-white/90">ваш</strong> импорт и правила фракции.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 font-mono tabular-nums text-white/90">
+              Документов: {stats.docs}
+            </span>
+            <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 font-mono tabular-nums text-white/90">
+              Статей: {stats.articles}
+            </span>
+          </div>
         </div>
       </header>
+
+      <section className="glass rounded-2xl p-6">
+        <h2 className="text-sm font-semibold text-white">Как пользоваться LexPatrol на посту</h2>
+        <p className="mt-1 text-xs text-app-muted">
+          От импорта документов до игры и заметок после инцидента — одна цепочка в приложении.
+        </p>
+        <ol className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <li className="rounded-xl border border-white/[0.06] bg-black/25 px-4 py-4">
+            <span className="font-mono text-[10px] text-accent/90">01</span>
+            <p className="mt-2 text-[13px] font-medium text-white">Подготовить базу</p>
+            <p className="mt-1.5 text-[11px] leading-snug text-app-muted">
+              Импорт актуальных кодексов и уставов — без этого поиск и оверлей пусты.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link className="text-[11px] font-medium text-accent hover:underline" to="/import">
+                Импорт
+              </Link>
+              <span className="text-white/20">·</span>
+              <Link className="text-[11px] font-medium text-accent hover:underline" to="/browser">
+                Браузер
+              </Link>
+            </div>
+          </li>
+          <li className="rounded-xl border border-white/[0.06] bg-black/25 px-4 py-4">
+            <span className="font-mono text-[10px] text-accent/90">02</span>
+            <p className="mt-2 text-[13px] font-medium text-white">Найти до игры</p>
+            <p className="mt-1.5 text-[11px] leading-snug text-app-muted">
+              Ниже — кнопки с запросами под типичные ситуации; запросы можно подстроить под ваш форум.
+            </p>
+            <Link className="mt-3 inline-block text-[11px] font-medium text-accent hover:underline" to="/kb">
+              База знаний →
+            </Link>
+          </li>
+          <li className="rounded-xl border border-white/[0.06] bg-black/25 px-4 py-4">
+            <span className="font-mono text-[10px] text-accent/90">03</span>
+            <p className="mt-2 text-[13px] font-medium text-white">В игре</p>
+            <p className="mt-1.5 text-[11px] leading-snug text-app-muted">
+              Оверлей поверх окна: закрепы статей и поиск по базе ({hkDisp.search}). Переключение мыши — {hkDisp.clickThrough}.
+            </p>
+            <button
+              type="button"
+              className="mt-3 text-[11px] font-medium text-accent hover:underline"
+              onClick={() => void window.lawHelper.overlay.show()}
+            >
+              Показать оверлей
+            </button>
+          </li>
+          <li className="rounded-xl border border-white/[0.06] bg-black/25 px-4 py-4">
+            <span className="font-mono text-[10px] text-accent/90">04</span>
+            <p className="mt-2 text-[13px] font-medium text-white">После инцидента</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-app-muted">
+              Вкладка «Заметки» — для любых записей: общий текст по смене или пометки к конкретной статье. Чтобы привязать
+              заметку к статье, сначала добавьте её в <strong className="font-medium text-white/75">закладки</strong> в читателе,
+              затем в заметке выберите эту статью — так проще собрать материал к репорту или разбору.
+            </p>
+            <Link className="mt-3 inline-block text-[11px] font-medium text-accent hover:underline" to="/notes">
+              Заметки и закладки →
+            </Link>
+          </li>
+        </ol>
+      </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
         <div className="glass rounded-2xl p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-white">Быстрый поиск</h2>
-              <p className="mt-1 text-xs text-app-muted">
-                Переход в базу знаний с готовым запросом. Список запросов можно изменить под свой сервер.
+              <h2 className="text-sm font-semibold text-white">Быстрый поиск по ситуации</h2>
+              <p className="mt-1 text-xs leading-relaxed text-app-muted">
+                Каждая кнопка открывает базу знаний с уже введённым запросом. Настройте под свои формулировки на форуме — кнопка
+                «Изменить запросы».
               </p>
             </div>
             {!editing ? (
@@ -275,56 +366,83 @@ export function GovernmentPage(): JSX.Element {
           )}
         </div>
 
-        <div className="glass rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-white">Импорт и оверлей</h2>
-          <ul className="mt-3 space-y-3 text-sm text-app-muted">
-            <li>
-              <Link className="text-accent hover:underline" to="/import">
-                Импорт текста/HTML
-              </Link>{' '}
-              — вставьте выдержки из устава, кодексов форума или PDF (текстом).
-            </li>
-            <li>
-              <Link className="text-accent hover:underline" to="/browser">
-                Встроенный браузер
-              </Link>{' '}
-              — войдите на форум вручную, затем «Импорт текущей страницы».
-            </li>
-            <li>
-              Закрепите статьи на оверлее —{' '}
-              <button
-                type="button"
-                className="text-accent hover:underline"
-                onClick={() => void window.lawHelper.overlay.show()}
-              >
-                показать оверлей
-              </button>
-              .
-            </li>
-          </ul>
+        <div className="space-y-6">
+          <div className="glass rounded-2xl p-6">
+            <h2 className="text-sm font-semibold text-white">Импорт и оверлей</h2>
+            <ul className="mt-3 space-y-3 text-sm text-app-muted">
+              <li>
+                <Link className="font-medium text-accent hover:underline" to="/import">
+                  Импорт текста/HTML
+                </Link>{' '}
+                — уставы, кодексы с форума или выдержки из PDF текстом.
+              </li>
+              <li>
+                <Link className="font-medium text-accent hover:underline" to="/browser">
+                  Встроенный браузер
+                </Link>{' '}
+                — авторизация на форуме и импорт открытой страницы.
+              </li>
+              <li>
+                Окно поверх игры:{' '}
+                <button
+                  type="button"
+                  className="font-medium text-accent hover:underline"
+                  onClick={() => void window.lawHelper.overlay.show()}
+                >
+                  показать оверлей
+                </button>{' '}
+                · скрыть / показать —{' '}
+                <span className="font-mono text-[11px] text-white/70">{hkDisp.toggle}</span>.
+              </li>
+            </ul>
+          </div>
+
+          <div className="glass rounded-2xl p-6">
+            <h2 className="text-sm font-semibold text-white">Горячие клавиши</h2>
+            <p className="mt-1 text-xs text-app-muted">
+              Глобальные сочетания работают, пока запущен LexPatrol. Изменить можно в настройках.
+            </p>
+            <dl className="mt-4 space-y-2 border-t border-white/[0.06] pt-4 text-[11px] text-app-muted">
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-mono text-white/75">{hkDisp.toggle}</dt>
+                <dd>показать / скрыть оверлей</dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-mono text-white/75">{hkDisp.search}</dt>
+                <dd>фокус поиска по базе в оверлее</dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-mono text-white/75">{hkDisp.clickThrough}</dt>
+                <dd>клики в игру или в панель оверлея</dd>
+              </div>
+            </dl>
+            <Link to="/settings" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">
+              Настройки →
+            </Link>
+          </div>
         </div>
       </section>
 
       <section className="glass rounded-2xl p-6">
-        <h2 className="text-sm font-semibold text-white">Напоминания</h2>
-        <ul className="mt-4 space-y-3 text-sm text-app-muted">
-          {REMINDERS.map((line) => (
-            <li key={line} className="flex gap-3">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent/80" />
-              <span>{line}</span>
+        <h2 className="text-sm font-semibold text-white">Напоминания на посту</h2>
+        <ul className="mt-5 grid gap-4 md:grid-cols-2">
+          {REMINDERS.map((item) => (
+            <li key={item.title} className="rounded-xl border border-white/[0.05] bg-black/20 px-4 py-4">
+              <p className="text-[13px] font-medium text-white/95">{item.title}</p>
+              <p className="mt-2 text-[12px] leading-relaxed text-app-muted">{item.text}</p>
             </li>
           ))}
         </ul>
       </section>
 
       <section className="rounded-2xl border border-dashed border-white/15 bg-surface/40 p-6">
-        <h2 className="text-sm font-semibold text-white">ИИ под вашу роль</h2>
-        <p className="mt-2 text-sm text-app-muted">
-          В разделе «ИИ» можно задать агента с ролью и инструкциями (например, краткие ответы «от лица патруля» со ссылками на
-          статьи базы). Так выдерживается стиль сценария, без смешения с реальными органами.
+        <h2 className="text-sm font-semibold text-white">ИИ под стиль сценария</h2>
+        <p className="mt-2 text-sm leading-relaxed text-app-muted">
+          В разделе «ИИ» можно задать агента с инструкциями под вашу фракцию: короткие ответы со ссылками на статьи из базы,
+          без смешения с реальными госорганами. Провайдер и ключи задаёте вы.
         </p>
         <Link to="/ai" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">
-          Настроить провайдера и агентов →
+          ИИ и агенты →
         </Link>
       </section>
     </div>

@@ -28,8 +28,9 @@ export default function App(): JSX.Element {
         <Route path="/import" element={<ImportPage />} />
         <Route path="/browser" element={<BrowserImportPage />} />
         <Route path="/kb" element={<KnowledgeBasePage />} />
-        <Route path="/government" element={<GovernmentPage />} />
-        <Route path="/mvd" element={<Navigate to="/government" replace />} />
+        <Route path="/patrol" element={<GovernmentPage />} />
+        <Route path="/government" element={<Navigate to="/patrol" replace />} />
+        <Route path="/mvd" element={<Navigate to="/patrol" replace />} />
         <Route path="/reader/:documentId/:articleId?" element={<ReaderPage />} />
         <Route path="/ai" element={<AiPage />} />
         <Route path="/notes" element={<NotesPage />} />

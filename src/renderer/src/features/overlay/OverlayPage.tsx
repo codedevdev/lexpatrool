@@ -22,6 +22,8 @@ interface Pinned {
   penalty_hint: string | null
   display_meta_json: string
   sort_order?: number
+  /** Соответствует documents.article_import_filter (импорт «только справочные» = without_sanctions) */
+  document_article_import_filter?: string | null
 }
 
 function parseDisplayMeta(raw: string | null | undefined): ArticleDisplayMeta {
@@ -32,6 +34,10 @@ function parseDisplayMeta(raw: string | null | undefined): ArticleDisplayMeta {
   } catch {
     return {}
   }
+}
+
+function isReferenceImportDoc(p: { document_article_import_filter?: string | null }): boolean {
+  return p.document_article_import_filter === 'without_sanctions'
 }
 
 /** Короткая выжимка для карточки списка (не длинная простыня). */
@@ -55,6 +61,7 @@ function previewEssenceLine(p: Pinned): string {
 
 function previewPenalty(p: Pinned): string {
   if (p.penalty_hint?.trim()) return p.penalty_hint.trim()
+  if (isReferenceImportDoc(p)) return '—'
   const hint = extractPenaltyHints(p.body_clean, 4).split('\n')[0]?.trim()
   return hint ?? '—'
 }
@@ -74,9 +81,10 @@ function ruArticlesCount(n: number): string {
   return `${n} статей`
 }
 
-/** Превью текста на карточке: в фокусе — только релевантные санкциям строки. */
+/** Превью текста на карточке: в фокусе — только релевантные санкциям строки (кроме справочных документов). */
 function previewCardEssenceLine(p: Pinned, focusMode: boolean): string {
   if (!focusMode) return previewEssenceLine(p)
+  if (isReferenceImportDoc(p)) return previewEssenceLine(p)
   const raw = extractPenaltyHints(p.body_clean, 16).trim()
   if (raw) {
     const flat = raw.replace(/\s+/g, ' ')
@@ -108,11 +116,20 @@ function mapArticleGetToPinned(row: unknown): Pinned | null {
     document_title: typeof r.document_title === 'string' ? r.document_title : '',
     summary_short: r.summary_short != null ? String(r.summary_short) : null,
     penalty_hint: r.penalty_hint != null ? String(r.penalty_hint) : null,
-    display_meta_json: typeof r.display_meta_json === 'string' ? r.display_meta_json : '{}'
+    display_meta_json: typeof r.display_meta_json === 'string' ? r.display_meta_json : '{}',
+    document_article_import_filter:
+      r.document_article_import_filter != null ? String(r.document_article_import_filter) : null
   }
 }
 
 const UI_KEY = 'overlay_ui_prefs'
+
+/** Компакт — мало места; чтение — крупнее текст при узком заголовке; панель — поиск и все опции. */
+export type OverlayLayoutPreset = 'compact' | 'reading' | 'full'
+
+function isChromeCompact(preset: OverlayLayoutPreset): boolean {
+  return preset === 'compact' || preset === 'reading'
+}
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value)
@@ -133,6 +150,7 @@ function MouseModeRow({
   clickThrough: boolean
   onOverlay: () => void
   onGame: () => void
+  /** compact — только переключатель; full — подсказки под кнопками мыши */
   variant: 'compact' | 'full'
   /** Подпись для режима «мышь в игру» из настроек хоткеев */
   hotkeyMouse: string
@@ -196,7 +214,7 @@ export function OverlayPage(): JSX.Element {
   const debouncedGlobal = useDebounced(globalQ, 280)
   const [globalHits, setGlobalHits] = useState<SearchHit[]>([])
   const [globalOpen, setGlobalOpen] = useState(false)
-  const [compact, setCompact] = useState(false)
+  const [layoutPreset, setLayoutPreset] = useState<OverlayLayoutPreset>('full')
   const [focusMode, setFocusMode] = useState(false)
   const [fontScale, setFontScale] = useState(1)
   const [toolsExpanded, setToolsExpanded] = useState(true)
@@ -217,6 +235,10 @@ export function OverlayPage(): JSX.Element {
   /** Просмотр статьи из глобального поиска (не из закрепов) — остаёмся в оверлее. */
   const [searchArticle, setSearchArticle] = useState<Pinned | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const chromeCompact = isChromeCompact(layoutPreset)
+  const readingComfort = layoutPreset === 'reading'
+  const readingSizeBoost = readingComfort ? 1.085 : 1
+
   const filterInputRef = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(async () => {
@@ -241,6 +263,7 @@ export function OverlayPage(): JSX.Element {
       if (raw) {
         try {
           const j = JSON.parse(raw) as {
+            layoutPreset?: OverlayLayoutPreset
             opacity?: number
             compact?: boolean
             focusMode?: boolean
@@ -248,8 +271,12 @@ export function OverlayPage(): JSX.Element {
             toolsExpanded?: boolean
             cheatSheetMode?: boolean
           }
+          if (j.layoutPreset === 'compact' || j.layoutPreset === 'reading' || j.layoutPreset === 'full') {
+            setLayoutPreset(j.layoutPreset)
+          } else if (typeof j.compact === 'boolean') {
+            setLayoutPreset(j.compact ? 'compact' : 'full')
+          }
           if (typeof j.opacity === 'number') nextOpacity = j.opacity
-          if (typeof j.compact === 'boolean') setCompact(j.compact)
           if (typeof j.focusMode === 'boolean') setFocusMode(j.focusMode)
           if (typeof j.fontScale === 'number') setFontScale(j.fontScale)
           if (typeof j.toolsExpanded === 'boolean') setToolsExpanded(j.toolsExpanded)
@@ -272,16 +299,16 @@ export function OverlayPage(): JSX.Element {
   useEffect(() => {
     void window.lawHelper.settings.set(
       UI_KEY,
-      JSON.stringify({ opacity, compact, focusMode, fontScale, toolsExpanded, cheatSheetMode })
+      JSON.stringify({ opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode })
     )
     void window.lawHelper.settings.set('overlay_opacity', String(opacity))
-  }, [opacity, compact, focusMode, fontScale, toolsExpanded, cheatSheetMode])
+  }, [opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode])
 
   useEffect(() => {
     void refresh()
     const off = window.lawHelper.overlay.onPinsUpdated(() => void refresh())
     const offSearch = window.lawHelper.overlay.onFocusSearch(() => {
-      setCompact(false)
+      setLayoutPreset('full')
       setToolsExpanded(true)
       searchInputRef.current?.focus()
       setGlobalOpen(true)
@@ -379,7 +406,13 @@ export function OverlayPage(): JSX.Element {
   const bodyDisplay = useMemo(() => {
     if (!current) return ''
     const raw = current.body_clean
-    if (focusMode) return extractPenaltyHints(raw, 36)
+    if (focusMode) {
+      if (isReferenceImportDoc(current)) {
+        if (!filterLocal.trim()) return raw
+        return filterBody(raw, filterLocal)
+      }
+      return extractPenaltyHints(raw, 36)
+    }
     if (!filterLocal.trim()) return raw
     return filterBody(raw, filterLocal)
   }, [current, focusMode, filterLocal])
@@ -387,7 +420,13 @@ export function OverlayPage(): JSX.Element {
   const detailBodyDisplay = useMemo(() => {
     if (!activeDetailArticle) return ''
     const raw = activeDetailArticle.body_clean
-    if (focusMode) return extractPenaltyHints(raw, 48)
+    if (focusMode) {
+      if (isReferenceImportDoc(activeDetailArticle)) {
+        if (!filterLocal.trim()) return raw
+        return filterBody(raw, filterLocal)
+      }
+      return extractPenaltyHints(raw, 48)
+    }
     if (!filterLocal.trim()) return raw
     return filterBody(raw, filterLocal)
   }, [activeDetailArticle, focusMode, filterLocal])
@@ -427,15 +466,17 @@ export function OverlayPage(): JSX.Element {
     <div className="flex h-screen min-h-0 flex-col rounded-xl border border-white/[0.12] bg-gradient-to-b from-[#0e1219]/95 via-[#0a0d12]/92 to-[#080a0e]/95 text-app shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_24px_64px_rgba(0,0,0,0.55)] backdrop-blur-xl">
       {/* Title bar */}
       <header
-        className={`shrink-0 border-b border-white/[0.08] bg-black/20 px-2 ${compact ? 'py-1.5' : 'py-2'}`}
+        className={`shrink-0 border-b border-white/[0.08] bg-black/20 px-2 ${chromeCompact ? 'py-1.5' : 'py-2'}`}
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        {compact ? (
+        {chromeCompact ? (
           <>
             <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2 pl-0.5">
                 <span className="truncate text-[10px] font-bold uppercase tracking-[0.12em] text-white/95">LexPatrol</span>
-                <span className="text-[9px] text-white/35">компакт</span>
+                <span className="text-[9px] text-white/35">
+                  {layoutPreset === 'reading' ? 'чтение' : 'компакт'}
+                </span>
               </div>
               <div
                 className="flex shrink-0 flex-wrap items-center justify-end gap-1"
@@ -445,7 +486,7 @@ export function OverlayPage(): JSX.Element {
                   type="button"
                   title="Полная панель: поиск, фильтр, настройки"
                   className="rounded-md border border-accent/35 bg-accent/15 px-2 py-1 text-[9px] font-semibold text-accent hover:bg-accent/25"
-                  onClick={() => setCompact(false)}
+                  onClick={() => setLayoutPreset('full')}
                 >
                   Панель
                 </button>
@@ -626,12 +667,7 @@ export function OverlayPage(): JSX.Element {
             </div>
 
             <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-white/[0.05] pt-2">
-              <OverlayOptionToggle
-                label="Компакт"
-                hint="Минимальный оверлей: только закрепы и детали; без поиска и настроек. Плотнее карточки. «Панель» — вернуть всё."
-                checked={compact}
-                onChange={setCompact}
-              />
+              <LayoutPresetControl value={layoutPreset} onChange={setLayoutPreset} />
               <OverlayOptionToggle
                 label="Фокус"
                 hint="Карточки: превью и чип про санкции. Детали: без блока «Залог», тело — по строкам санкций. «Читать»: то же для текста."
@@ -682,30 +718,41 @@ export function OverlayPage(): JSX.Element {
       </header>
 
       <div
-        className={`flex min-h-0 flex-1 ${compact ? 'p-1' : 'p-2'}`}
+        className={`flex min-h-0 flex-1 ${
+          chromeCompact ? (readingComfort ? 'p-1.5' : 'p-1') : 'p-2'
+        }`}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <section className="min-h-0 w-full flex-1 overflow-hidden">
-          {pins.length === 0 ? (
+          {pins.length === 0 && !searchArticle ? (
             <div className="flex h-full flex-col justify-center rounded-xl border border-dashed border-white/15 bg-black/20 p-6 text-center">
               <p className="text-sm text-white/80">Нет закреплённых статей</p>
               <p className="mt-2 text-[11px] leading-relaxed text-app-muted">
-                В LexPatrol откройте читатель и нажмите «На оверлей».
+                В LexPatrol откройте читатель и нажмите «На оверлей». Поиск по всей базе — в шапке; результат откроется здесь.
               </p>
             </div>
           ) : cheatSheetMode && !detailId && !searchArticle ? (
             <div
               className="flex h-full flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-gradient-to-b from-[#0c1018]/95 to-black/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-              style={{ fontSize: `${11 * fontScale}px` }}
+              style={{ fontSize: `${11 * fontScale * readingSizeBoost}px` }}
             >
               <div
-                className={`shrink-0 border-b border-white/[0.06] ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
+                className={`shrink-0 border-b border-white/[0.06] ${
+                  chromeCompact ? (readingComfort ? 'px-2.5 py-1.5' : 'px-2 py-1') : 'px-3 py-2'
+                }`}
               >
-                {compact ? (
-                  <div className="flex justify-end">
-                    <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[9px] tabular-nums text-white/45">
-                      {ruArticlesCount(pins.length)}
-                    </span>
+                {chromeCompact ? (
+                  <div className="flex flex-col gap-1">
+                    {readingComfort ? (
+                      <p className="text-[9px] leading-snug text-accent/85">
+                        Режим чтения — крупнее текст; поиск по базе — кнопка «Панель» или горячая клавиша.
+                      </p>
+                    ) : null}
+                    <div className="flex justify-end">
+                      <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[9px] tabular-nums text-white/45">
+                        {ruArticlesCount(pins.length)}
+                      </span>
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -722,11 +769,15 @@ export function OverlayPage(): JSX.Element {
                   </>
                 )}
               </div>
-              <div className="min-h-0 flex-1 overflow-auto px-2 pb-2 pt-2">
+              <div className={`min-h-0 flex-1 overflow-auto pb-2 pt-2 ${readingComfort ? 'px-2.5' : 'px-2'}`}>
                 {filteredPins.length === 0 ? (
                   <p className="p-4 text-center text-[11px] text-white/50">Нет совпадений по фильтру.</p>
                 ) : (
-                  <ul className={`flex flex-col ${compact ? 'gap-1.5' : 'gap-2'}`}>
+                  <ul
+                    className={`flex flex-col ${
+                      chromeCompact ? (readingComfort ? 'gap-2' : 'gap-1.5') : 'gap-2'
+                    }`}
+                  >
                     {filteredPins.map((p) => {
                       const i = pins.findIndex((x) => x.id === p.id)
                       const meta = parseDisplayMeta(p.display_meta_json)
@@ -749,7 +800,13 @@ export function OverlayPage(): JSX.Element {
                                 setSearchArticle(null)
                                 setDetailId(p.id)
                               }}
-                              className={`group w-full text-left ${compact ? 'px-2.5 pb-1.5 pt-2' : 'px-3 pb-2 pt-2.5'}`}
+                              className={`group w-full text-left ${
+                                chromeCompact
+                                  ? readingComfort
+                                    ? 'px-3 pb-2 pt-2.5'
+                                    : 'px-2.5 pb-1.5 pt-2'
+                                  : 'px-3 pb-2 pt-2.5'
+                              }`}
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <span className="shrink-0 rounded-md bg-accent/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent">
@@ -762,7 +819,7 @@ export function OverlayPage(): JSX.Element {
                               </div>
                               <p
                                 className={`mt-1.5 text-[10px] leading-relaxed text-white/55 ${
-                                  focusMode ? 'line-clamp-3' : 'line-clamp-2'
+                                  focusMode ? 'line-clamp-3' : readingComfort ? 'line-clamp-3' : 'line-clamp-2'
                                 }`}
                               >
                                 {previewCardEssenceLine(p, focusMode)}
@@ -776,12 +833,20 @@ export function OverlayPage(): JSX.Element {
                                 {pen && pen !== '—' ? (
                                   <span
                                     className={`max-w-full truncate rounded-md border px-1.5 py-0.5 text-[9px] ${
-                                      focusMode
-                                        ? 'border-amber-400/45 bg-amber-500/15 font-medium text-amber-50/95'
-                                        : 'border-amber-500/20 bg-amber-500/10 text-amber-100/90'
+                                      isReferenceImportDoc(p)
+                                        ? focusMode
+                                          ? 'border-zinc-400/35 bg-zinc-500/15 font-medium text-zinc-100/95'
+                                          : 'border-white/[0.12] bg-white/[0.06] text-white/78'
+                                        : focusMode
+                                          ? 'border-amber-400/45 bg-amber-500/15 font-medium text-amber-50/95'
+                                          : 'border-amber-500/20 bg-amber-500/10 text-amber-100/90'
                                     }`}
                                   >
-                                    {focusMode ? `⚑ ${penShort}` : penShort}
+                                    {isReferenceImportDoc(p)
+                                      ? penShort
+                                      : focusMode
+                                        ? `⚑ ${penShort}`
+                                        : penShort}
                                   </span>
                                 ) : null}
                               </div>
@@ -824,32 +889,30 @@ export function OverlayPage(): JSX.Element {
                 )}
               </div>
             </div>
-          ) : cheatSheetMode && (detailId || searchArticle) ? (
-            activeDetailArticle ? (
-              <ArticleDetailPane
-                pin={activeDetailArticle}
-                bodyText={detailBodyDisplay}
-                fontScale={fontScale}
-                compact={compact}
-                focusMode={focusMode}
-                fromSearch={Boolean(searchArticle)}
-                onBack={() => {
-                  setSearchArticle(null)
-                  setDetailId(null)
-                }}
-                onOpenReader={() =>
-                  void window.lawHelper.openReader(activeDetailArticle.document_id, activeDetailArticle.id)
-                }
-              />
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center rounded-xl border border-white/10 p-6 text-center text-[11px] text-white/45">
-                Статья недоступна (снята с закрепа).
-              </div>
-            )
+          ) : activeDetailArticle && (searchArticle || (cheatSheetMode && detailId)) ? (
+            <ArticleDetailPane
+              pin={activeDetailArticle}
+              bodyText={detailBodyDisplay}
+              fontScale={fontScale}
+              compact={chromeCompact}
+              readingComfort={readingComfort}
+              focusMode={focusMode}
+              fromSearch={Boolean(searchArticle)}
+              onBack={() => {
+                setSearchArticle(null)
+                setDetailId(null)
+              }}
+              onOpenReader={() =>
+                void window.lawHelper.openReader(activeDetailArticle.document_id, activeDetailArticle.id)
+              }
+            />
           ) : current ? (
             <div
               className="flex h-full flex-col rounded-xl border border-white/[0.08] bg-gradient-to-b from-black/40 to-black/25 p-3"
-              style={{ fontSize: `${12 * fontScale}px`, lineHeight: compact ? 1.38 : 1.55 }}
+              style={{
+                fontSize: `${12 * fontScale * readingSizeBoost}px`,
+                lineHeight: chromeCompact ? (readingComfort ? 1.48 : 1.38) : 1.55
+              }}
             >
               {pins.length > 1 ? (
                 <div className="mb-2 flex max-w-full gap-1 overflow-x-auto pb-1">
@@ -906,7 +969,7 @@ export function OverlayPage(): JSX.Element {
         className="shrink-0 border-t border-white/[0.06] bg-black/25 px-2 py-1.5 text-[9px] leading-relaxed text-white/40"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        {compact ? (
+        {chromeCompact ? (
           <>
             <span className="text-white/55">⌨</span> «Панель» — поиск и настройки · ◀▶⤢ — позиция окна · {hkDisp.search}{' '}
             — то же · {hkDisp.clickThrough} — мышь · Esc — скрыть
@@ -940,6 +1003,7 @@ function ArticleDetailPane({
   bodyText,
   fontScale,
   compact,
+  readingComfort,
   focusMode,
   fromSearch,
   onBack,
@@ -949,6 +1013,8 @@ function ArticleDetailPane({
   bodyText: string
   fontScale: number
   compact: boolean
+  /** Узкая шапка + укрупнение для чтения в игре */
+  readingComfort?: boolean
   focusMode: boolean
   fromSearch?: boolean
   onBack: () => void
@@ -957,13 +1023,17 @@ function ArticleDetailPane({
   const meta = parseDisplayMeta(pin.display_meta_json)
   const bail = meta.bailHint?.trim() || previewBail(meta, pin.body_clean)
   const showBailBlock = Boolean(bail) && !focusMode
+  const referenceDoc = isReferenceImportDoc(pin)
   const hasSummary = Boolean(pin.summary_short?.trim() || showBailBlock || pin.penalty_hint?.trim())
   const sections = useMemo(() => splitBodyForReading(bodyText), [bodyText])
 
   return (
     <div
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-gradient-to-b from-[#0a0e14]/98 via-[#080b10]/95 to-black/90 shadow-[inset_0_0_0_1px_rgba(91,140,255,0.08),0_12px_40px_rgba(0,0,0,0.45)]"
-      style={{ fontSize: `${12 * fontScale}px`, lineHeight: compact ? 1.42 : 1.58 }}
+      style={{
+        fontSize: `${12 * fontScale * (readingComfort ? 1.085 : 1)}px`,
+        lineHeight: compact ? (readingComfort ? 1.52 : 1.42) : 1.58
+      }}
     >
       <div className="shrink-0 border-b border-white/[0.07] bg-black/30 px-3 py-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1013,9 +1083,27 @@ function ArticleDetailPane({
             </div>
           ) : null}
           {pin.penalty_hint?.trim() ? (
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.08] px-3 py-2">
-              <div className="text-[9px] font-medium uppercase tracking-wide text-amber-200/75">Наказание</div>
-              <p className="mt-1 text-[11px] leading-relaxed text-amber-50/95">{pin.penalty_hint.trim()}</p>
+            <div
+              className={
+                referenceDoc
+                  ? 'rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2'
+                  : 'rounded-lg border border-amber-500/20 bg-amber-500/[0.08] px-3 py-2'
+              }
+            >
+              <div
+                className={`text-[9px] font-medium uppercase tracking-wide ${
+                  referenceDoc ? 'text-white/50' : 'text-amber-200/75'
+                }`}
+              >
+                {referenceDoc ? 'Пояснение' : 'Наказание'}
+              </div>
+              <p
+                className={`mt-1 text-[11px] leading-relaxed ${
+                  referenceDoc ? 'text-white/88' : 'text-amber-50/95'
+                }`}
+              >
+                {pin.penalty_hint.trim()}
+              </p>
             </div>
           ) : null}
         </div>
@@ -1129,6 +1217,46 @@ function NavBtn({ children, onClick }: { children: React.ReactNode; onClick: () 
     >
       {children}
     </button>
+  )
+}
+
+/** Три пресета шапки: компакт / чтение / полная панель */
+function LayoutPresetControl({
+  value,
+  onChange
+}: {
+  value: OverlayLayoutPreset
+  onChange: (p: OverlayLayoutPreset) => void
+}): JSX.Element {
+  const items: { id: OverlayLayoutPreset; label: string; title: string }[] = [
+    { id: 'compact', label: 'Компакт', title: 'Минимум места в углу экрана' },
+    { id: 'reading', label: 'Чтение', title: 'Такая же узкая шапка, но крупнее текст карточек и статьи' },
+    { id: 'full', label: 'Панель', title: 'Поиск по базе, фильтры и все переключатели' }
+  ]
+  return (
+    <div className="min-w-0 flex-1 sm:max-w-lg">
+      <div className="text-[9px] font-medium uppercase tracking-wide text-white/45">Режим окна</div>
+      <div className="mt-1 flex rounded-lg border border-white/10 bg-black/40 p-0.5">
+        {items.map((it) => (
+          <button
+            key={it.id}
+            type="button"
+            title={it.title}
+            onClick={() => onChange(it.id)}
+            className={`flex-1 rounded-md px-1.5 py-1.5 text-[10px] font-semibold transition sm:px-2 ${
+              value === it.id
+                ? 'bg-accent/35 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
+                : 'text-white/50 hover:bg-white/[0.06] hover:text-white/88'
+            }`}
+          >
+            {it.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-[9px] leading-snug text-white/42">
+        Для игры часто удобнее «Чтение»: меньше отвлекает шапка, текст крупнее. Горячая клавиша поиска открывает полную панель.
+      </p>
+    </div>
   )
 }
 

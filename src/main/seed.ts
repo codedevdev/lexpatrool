@@ -56,19 +56,19 @@ export function seedIfEmpty(db: Database): void {
   const catGov = uuid()
   db.prepare(
     `INSERT INTO categories (id, name, parent_id, color, sort_order) VALUES (?, ?, NULL, ?, 1)`
-  ).run(catGov, 'Гос. службы (полиция / EMS и др.)', '#3ecf8e')
+  ).run(catGov, 'На посту · госслужба / EMS', '#3ecf8e')
 
   const govSource = uuid()
   db.prepare(
     `INSERT INTO sources (id, title, url, source_type, imported_at, tags_json, category_id, code_family, metadata_json)
      VALUES (?, ?, NULL, 'paste_text', ?, ?, ?, 'gov_reference', '{}')`
-  ).run(govSource, 'Шпаргалка: гос. органы (пример)', now, JSON.stringify(['government', 'rp_example', 'police']), catGov)
+  ).run(govSource, 'Шпаргалка: на посту (пример)', now, JSON.stringify(['government', 'rp_example', 'police']), catGov)
 
   const govDoc = uuid()
   db.prepare(
     `INSERT INTO documents (id, source_id, title, slug, created_at, updated_at, category_id)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(govDoc, govSource, 'Госорганы: типовые напоминания (пример)', 'gov-cheatsheet', now, now, catGov)
+  ).run(govDoc, govSource, 'На посту: типовые напоминания (пример)', 'gov-cheatsheet', now, now, catGov)
 
   const govSplits = [
     {
@@ -88,7 +88,7 @@ export function seedIfEmpty(db: Database): void {
     db.prepare(
       `INSERT INTO articles (id, document_id, article_number, heading, level, sort_order, body_clean, path_json)
        VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
-    ).run(aid, govDoc, s.n, s.h, i + 1, s.b, JSON.stringify(['Гос. органы', s.h]))
+    ).run(aid, govDoc, s.n, s.h, i + 1, s.b, JSON.stringify(['На посту', s.h]))
   })
 
   db.prepare(

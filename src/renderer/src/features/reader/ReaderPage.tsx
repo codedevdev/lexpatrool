@@ -117,6 +117,8 @@ export function ReaderPage(): JSX.Element {
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [docTitle, setDocTitle] = useState('')
+  /** Режим импорта документа (without_sanctions = справочный кодекс без таблицы санкций). */
+  const [docImportFilter, setDocImportFilter] = useState<string | null>(null)
   const [articles, setArticles] = useState<ArticleRow[]>([])
   const [active, setActive] = useState<ArticleRow | null>(null)
   const [articleMismatch, setArticleMismatch] = useState(false)
@@ -187,11 +189,20 @@ export function ReaderPage(): JSX.Element {
   /** После успешного documents.get — чтобы переключать статьи по URL без loading и без сброса скролла сайдбара. */
   const fetchedDocumentIdRef = useRef<string | null>(null)
 
+  const referenceCodexDoc = docImportFilter === 'without_sanctions'
+
   const applyDocumentPayload = useCallback(
-    (r: { document: { title: string } | null | undefined; articles: ArticleRow[] }, routeArticleId: string | undefined) => {
+    (
+      r: {
+        document: { title: string; article_import_filter?: string | null } | null | undefined
+        articles: ArticleRow[]
+      },
+      routeArticleId: string | undefined
+    ) => {
       if (!r.document) {
         setLoadState('missing')
         setDocTitle('')
+        setDocImportFilter(null)
         setArticles([])
         setActive(null)
         return
@@ -199,6 +210,7 @@ export function ReaderPage(): JSX.Element {
 
       const list = Array.isArray(r.articles) ? r.articles : []
       setDocTitle(r.document.title)
+      setDocImportFilter(r.document.article_import_filter ?? null)
       setArticles(list)
       setLoadState('ok')
 
@@ -228,6 +240,7 @@ export function ReaderPage(): JSX.Element {
   useEffect(() => {
     if (!documentId) {
       setLoadState('missing')
+      setDocImportFilter(null)
       return
     }
 
@@ -261,7 +274,10 @@ export function ReaderPage(): JSX.Element {
     void window.lawHelper.documents
       .get(documentId)
       .then((res) => {
-        const r = res as { document: { title: string } | null | undefined; articles: ArticleRow[] }
+        const r = res as {
+          document: { title: string; article_import_filter?: string | null } | null | undefined
+          articles: ArticleRow[]
+        }
         fetchedDocumentIdRef.current = documentId
         applyDocumentPayload(r, articleId)
       })
@@ -270,6 +286,7 @@ export function ReaderPage(): JSX.Element {
         setLoadState('error')
         setLoadError(e instanceof Error ? e.message : String(e))
         setDocTitle('')
+        setDocImportFilter(null)
         setArticles([])
         setActive(null)
       })
@@ -316,7 +333,10 @@ export function ReaderPage(): JSX.Element {
     if (!documentId) return
     try {
       const res = await window.lawHelper.documents.get(documentId)
-      const r = res as { document: { title: string } | null | undefined; articles: ArticleRow[] }
+      const r = res as {
+        document: { title: string; article_import_filter?: string | null } | null | undefined
+        articles: ArticleRow[]
+      }
       fetchedDocumentIdRef.current = documentId
       applyDocumentPayload(r, articleId)
     } catch (e: unknown) {
@@ -585,8 +605,16 @@ export function ReaderPage(): JSX.Element {
                         active.summary_short?.trim() || activeMeta?.bailHint?.trim() ? 'mt-3' : ''
                       }
                     >
-                      <span className="text-xs uppercase tracking-wide text-app-muted">Наказание · </span>
-                      <span className="text-amber-100/90">{active.penalty_hint}</span>
+                      <span className="text-xs uppercase tracking-wide text-app-muted">
+                        {referenceCodexDoc ? 'Пояснение · ' : 'Наказание · '}
+                      </span>
+                      <span
+                        className={
+                          referenceCodexDoc ? 'text-white/85' : 'text-amber-100/90'
+                        }
+                      >
+                        {active.penalty_hint}
+                      </span>
                     </p>
                   ) : null}
                 </div>
@@ -680,7 +708,7 @@ export function ReaderPage(): JSX.Element {
               />
             </label>
             <label className="block text-xs text-app-muted">
-              Наказание (подсказка)
+              {referenceCodexDoc ? 'Пояснение / выдержка (не санкция)' : 'Наказание (подсказка)'}
               <input
                 className="mt-1 w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-sm text-white outline-none focus:border-accent"
                 value={articleDraft.penalty_hint}

@@ -5,7 +5,7 @@ import brandLogo from '../assets/brand-logo.png'
 
 const nav = [
   { to: '/', label: 'Обзор' },
-  { to: '/government', label: 'Гос. органы' },
+  { to: '/patrol', label: 'На посту' },
   { to: '/import', label: 'Импорт' },
   { to: '/browser', label: 'Браузер' },
   { to: '/kb', label: 'База' },

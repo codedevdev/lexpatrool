@@ -154,7 +154,12 @@ export function tryParseTableRows(raw: string): SplitArticle[] | null {
   return rows
 }
 
-export function enrichArticle(heading: string, body: string): ArticleEnrichment {
+export interface EnrichArticleOptions {
+  /** Импорт «Только справочные» — не заполнять penalty_hint строками, похожими на санкции УК */
+  referenceImport?: boolean
+}
+
+export function enrichArticle(heading: string, body: string, options?: EnrichArticleOptions): ArticleEnrichment {
   const meta: ArticleDisplayMeta = {}
   const text = body.replace(/\r\n/g, '\n')
 
@@ -189,9 +194,12 @@ export function enrichArticle(heading: string, body: string): ArticleEnrichment 
   const bailM = text.match(/Выход под залог\s*:\s*([^\n]+)/i)
   if (bailM) meta.bailHint = bailM[1]!.trim().slice(0, 220)
 
-  let penaltyHint = extractPenaltyHint(text)
-  if (!penaltyHint && partsAfterKeywords(text)) {
-    penaltyHint = partsAfterKeywords(text)
+  let penaltyHint: string | null = null
+  if (!options?.referenceImport) {
+    penaltyHint = extractPenaltyHint(text)
+    if (!penaltyHint && partsAfterKeywords(text)) {
+      penaltyHint = partsAfterKeywords(text)
+    }
   }
 
   const summaryShort = extractSummaryShort(heading, text)

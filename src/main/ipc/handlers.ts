@@ -134,7 +134,9 @@ function insertArticlesFromSplits(
       stack.push({ id: aid, articleNumber: num })
     }
 
-    const e = enrichArticle(heading, s.body)
+    const e = enrichArticle(heading, s.body, {
+      referenceImport: filterMode === 'without_sanctions'
+    })
     db.prepare(
       `INSERT INTO articles (id, document_id, article_number, heading, level, sort_order, body_clean, body_raw, path_json, summary_short, penalty_hint, display_meta_json, parent_article_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -276,7 +278,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('article:get', (_e, id: string) => {
     const row = getDb()
       .prepare(
-        `SELECT a.*, d.title AS document_title, d.id AS document_id, s.url AS source_url
+        `SELECT a.*, d.title AS document_title, d.id AS document_id, d.article_import_filter AS document_article_import_filter, s.url AS source_url
          FROM articles a
          JOIN documents d ON d.id = a.document_id
          LEFT JOIN sources s ON s.id = d.source_id
@@ -428,9 +430,10 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     )
 
     const docId = uuid()
+    const articleFilter = payload.articleFilter ?? null
     db.prepare(
-      `INSERT INTO documents (id, source_id, title, slug, created_at, updated_at, raw_html, raw_text, category_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO documents (id, source_id, title, slug, created_at, updated_at, raw_html, raw_text, category_id, article_import_filter)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       docId,
       sourceId,
@@ -440,7 +443,8 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       t,
       rawHtml,
       rawText,
-      payload.categoryId ?? null
+      payload.categoryId ?? null,
+      articleFilter
     )
 
     const splits = resolveArticleSplits(rawText, title, payload.splitArticles !== false)
@@ -757,10 +761,11 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     ).run(sourceId, title, payload.url, t, JSON.stringify(meta), payload.html, rawText)
 
     const docId = uuid()
+    const articleFilter = payload.articleFilter ?? null
     db.prepare(
-      `INSERT INTO documents (id, source_id, title, slug, created_at, updated_at, raw_html, raw_text)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(docId, sourceId, title, slugify(title), t, t, payload.html, rawText)
+      `INSERT INTO documents (id, source_id, title, slug, created_at, updated_at, raw_html, raw_text, article_import_filter)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(docId, sourceId, title, slugify(title), t, t, payload.html, rawText, articleFilter)
 
     insertArticlesFromSplits(db, docId, splits, rawText, payload.articleFilter)
 
@@ -801,9 +806,16 @@ export function registerIpcHandlers(ctx: IpcContext): void {
         return { ok: false as const, error: 'invalid' as const, field: label, detail: r.error }
       }
     }
-    saveHotkeys(db, merged)
-    applyOverlayGlobalShortcuts(overlay, db)
-    return { ok: true as const }
+    try {
+      saveHotkeys(db, merged)
+      return { ok: true as const }
+    } catch (e) {
+      console.error('[LexPatrol] hotkeys:set saveHotkeys', e)
+      throw e
+    } finally {
+      /** После validate все сочетания сняты; всегда восстанавливаем из БД (или дефолты), иначе горячие клавиши «молчат». */
+      applyOverlayGlobalShortcuts(overlay, db)
+    }
   })
 
   ipcMain.handle('hotkeys:reset-defaults', () => {

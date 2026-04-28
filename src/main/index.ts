@@ -110,8 +110,9 @@ function createMainWindow(options?: { deferShow?: boolean }): BrowserWindow {
   const deferShow = options?.deferShow === true
   const iconPath = resolveAppIconPath()
   const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    /** Стартовый размер окна: чуть ниже «плазменного» 16:9 — удобнее для сайдбара + контента. */
+    width: 1200,
+    height: 780,
     minWidth: 960,
     minHeight: 640,
     show: false,
@@ -239,7 +240,7 @@ app.whenReady().then(() => {
     if (typeof url === 'string' && url.startsWith('http')) shell.openExternal(url)
   })
 
-  applyOverlayGlobalShortcuts(overlay, getDb)
+  applyOverlayGlobalShortcuts(overlay, getDb())
 
   scheduleStartupUpdateCheck(() => mainWindow)
 
