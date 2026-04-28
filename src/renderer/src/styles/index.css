@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  background-color: transparent;
+  font-family: ui-sans-serif, system-ui, 'Segoe UI Variable', Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji',
+    'Segoe UI Emoji';
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+.glass {
+  @apply border border-white/[0.06] bg-surface/75 shadow-glass backdrop-blur-xl;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Main content subtle grid */
+main .max-w-6xl {
+  animation: fadeIn 0.35s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

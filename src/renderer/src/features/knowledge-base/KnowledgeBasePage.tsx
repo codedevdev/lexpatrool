@@ -1,0 +1,134 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+
+/** Строка из query — стабильная зависимость, без лишних синков при смене объекта searchParams. */
+function useSearchQueryParam(key: string): string {
+  const [searchParams] = useSearchParams()
+  return searchParams.get(key) ?? ''
+}
+
+interface DocRow {
+  id: string
+  title: string
+  updated_at: string
+  source_title?: string | null
+}
+
+export function KnowledgeBasePage(): JSX.Element {
+  const qFromUrl = useSearchQueryParam('q')
+  const [q, setQ] = useState(() => qFromUrl)
+  const [docs, setDocs] = useState<DocRow[]>([])
+  const [hits, setHits] = useState<
+    {
+      article_id: string
+      document_id: string
+      document_title: string
+      heading: string
+      snippet: string
+    }[]
+  >([])
+
+  useEffect(() => {
+    setQ(qFromUrl)
+  }, [qFromUrl])
+
+  useEffect(() => {
+    void window.lawHelper.documents.list().then((rows) => setDocs(rows as DocRow[]))
+  }, [])
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (!q.trim()) {
+        setHits([])
+        return
+      }
+      void window.lawHelper.search.query(q).then((h) =>
+        setHits(
+          h as {
+            article_id: string
+            document_id: string
+            document_title: string
+            heading: string
+            snippet: string
+          }[]
+        )
+      )
+    }, 200)
+    return () => clearTimeout(t)
+  }, [q])
+
+  const filtered = useMemo(() => {
+    if (!q.trim()) return docs
+    const s = q.toLowerCase()
+    return docs.filter((d) => d.title.toLowerCase().includes(s))
+  }, [docs, q])
+
+  async function removeDoc(id: string, title: string): Promise<void> {
+    if (!confirm(`Удалить документ «${title}» и все его статьи из базы? Это необратимо.`)) return
+    const r = await window.lawHelper.documents.delete(id)
+    if (r.ok) {
+      setDocs((prev) => prev.filter((d) => d.id !== id))
+      setHits((prev) => prev.filter((h) => h.document_id !== id))
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-white">База знаний</h1>
+          <p className="mt-2 text-sm text-app-muted">Полнотекстовый поиск (FTS5) по импортированным статьям.</p>
+        </div>
+        <input
+          className="w-full max-w-md rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-sm text-white outline-none focus:border-accent md:w-80"
+          placeholder="Поиск по заголовкам и тексту…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </header>
+
+      {hits.length > 0 && (
+        <section className="glass rounded-2xl p-5">
+          <h2 className="text-sm font-medium text-white">Совпадения по тексту</h2>
+          <ul className="mt-3 max-h-[min(42vh,22rem)] space-y-3 overflow-y-auto overscroll-contain pr-1">
+            {hits.map((h) => (
+              <li key={h.article_id} className="rounded-lg border border-white/5 bg-surface-raised/60 p-3">
+                <Link className="text-accent hover:underline" to={`/reader/${h.document_id}/${h.article_id}`}>
+                  {h.document_title} — {h.heading}
+                </Link>
+                <p className="mt-1 text-xs text-app-muted line-clamp-2">{h.snippet}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="glass rounded-2xl p-5">
+        <h2 className="text-sm font-medium text-white">Все документы</h2>
+        <ul className="mt-3 divide-y divide-white/5">
+          {filtered.map((d) => (
+            <li key={d.id} className="flex items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <Link className="text-white hover:text-accent" to={`/reader/${d.id}`}>
+                  {d.title}
+                </Link>
+                <div className="text-xs text-app-muted">{d.source_title ?? 'Локальный импорт'}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="text-xs text-app-muted">{new Date(d.updated_at).toLocaleString()}</span>
+                <button
+                  type="button"
+                  title="Удалить документ из базы"
+                  onClick={() => void removeDoc(d.id, d.title)}
+                  className="rounded-lg border border-red-500/30 px-2 py-1 text-xs text-red-300/90 hover:bg-red-500/10"
+                >
+                  Удалить
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  )
+}

@@ -1,0 +1,103 @@
+{
+  "name": "lexpatrol",
+  "version": "1.0.0",
+  "author": "LexPatrol",
+  "description": "LexPatrol — справочник норм и правил для гос. организаций GTA5RP (LSPD-style): импорт, поиск, оверлей. Без инъекций в игру.",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:clean": "node -e \"try{require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})}catch(e){}\" && electron-vite dev",
+    "build": "electron-vite build",
+    "build:win": "electron-vite build && electron-builder --win",
+    "preview": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "better-sqlite3": "^11.7.0",
+    "date-fns": "^4.1.0",
+    "jsdom": "^25.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "turndown": "^7.2.0",
+    "uuid": "^11.0.3",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/jsdom": "^21.1.7",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/turndown": "^5.0.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "build": {
+    "appId": "io.lexpatrol.desktop",
+    "productName": "LexPatrol",
+    "copyright": "Copyright © LexPatrol",
+    "icon": "build/app-icon.png",
+    "directories": {
+      "output": "LexPatrool-bin"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "src/db/migrations",
+        "to": "migrations"
+      },
+      {
+        "from": "resources/splash.html",
+        "to": "splash.html"
+      },
+      {
+        "from": "resources/app-icon.png",
+        "to": "app-icon.png"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "verifyUpdateCodeSignature": false,
+      "signDlls": false,
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": false,
+      "perMachine": false,
+      "warningsAsErrors": false,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    }
+  }
+}

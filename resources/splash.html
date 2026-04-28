@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LexPatrol</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          system-ui,
+          'Segoe UI',
+          sans-serif;
+        background: #0c0e12;
+        color: #e7e9ee;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 28px;
+        user-select: none;
+      }
+      img {
+        max-width: 128px;
+        height: auto;
+        margin-bottom: 18px;
+        pointer-events: none;
+      }
+      h1 {
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        margin-bottom: 6px;
+      }
+      p {
+        font-size: 13px;
+        color: rgba(231, 233, 238, 0.55);
+        margin-bottom: 22px;
+      }
+      .spinner {
+        width: 34px;
+        height: 34px;
+        border: 3px solid rgba(91, 140, 255, 0.22);
+        border-top-color: #5b8cff;
+        border-radius: 50%;
+        animation: spin 0.85s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <img src="app-icon.png" alt="" width="128" height="128" />
+    <h1>LexPatrol</h1>
+    <p>Загрузка интерфейса…</p>
+    <div class="spinner" aria-hidden="true"></div>
+  </body>
+</html>

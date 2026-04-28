@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ru" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- CSP убран: в Electron+Vite dev жёсткий CSP ломает загрузку модулей (в консоли SyntaxError в index.js:1 из-за HTML вместо JS). Политику можно вернуть точечно для production. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LexPatrol</title>
+  </head>
+  <!-- Не использовать bg-app: в теме app.DEFAULT = цвет текста (#e7e9ee), bg-app давал тот же оттенок и «смывал» контраст. Фон главного окна задаёт Electron backgroundColor; оверлей — прозрачный. -->
+  <body class="min-h-screen bg-transparent text-app antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
