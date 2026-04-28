@@ -37,6 +37,7 @@ jobs:
 
       - name: Upload installers to GitHub Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/')
+        # Текст релиза: GitHub генерирует заметки по API (PR, контрибьюторы). Шаблон секций — .github/release.yml
         uses: softprops/action-gh-release@v2
         with:
           draft: false

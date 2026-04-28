@@ -1,0 +1,9 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - dependencies
+  categories:
+    - title: Изменения
+      labels:
+        - '*'
