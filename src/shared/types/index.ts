@@ -89,7 +89,10 @@ export interface AiProviderConfig {
   allowBroaderContext?: boolean
 }
 
-/** Пользовательский ИИ-агент (роль): доп. промпт и опциональные переопределения провайдера. */
+/**
+ * Пользовательский ИИ-агент (роль): имя, описание и доп. промпт.
+ * Поля провайдера в БД оставлены для совместимости; приложение использует только общие настройки из `AiProviderConfig`.
+ */
 export interface AiAgentRecord {
   id: string
   name: string
@@ -114,6 +117,7 @@ export interface AiCompletePayload {
 
 export interface AiCitation {
   articleId: string
+  documentId: string
   documentTitle: string
   articleLabel: string
   excerpt: string

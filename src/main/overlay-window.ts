@@ -399,6 +399,12 @@ export class OverlayController {
     if (w && !w.isDestroyed()) w.webContents.send(channel, ...args)
   }
 
+  /** После импорта БД — перезагрузить UI оверлея. */
+  reloadIfOpen(): void {
+    const w = this.win
+    if (w && !w.isDestroyed()) w.webContents.reload()
+  }
+
   setClickThrough(enabled: boolean): void {
     this.clickThrough = enabled
     const w = this.win

@@ -5,6 +5,7 @@ import type {
   AiProviderConfig,
   AiCompletePayload,
   AiAgentRecord,
+  AiCitation,
   BrowserImportPayload,
   ManualDomParseRulesV1,
   ArticleUpdatePayload
@@ -234,7 +235,7 @@ const api = {
       ipcRenderer.invoke('toolOverlay:dock', which, where)
   },
   ai: {
-    complete: (payload: AiCompletePayload): Promise<{ text: string; citations: unknown[] }> =>
+    complete: (payload: AiCompletePayload): Promise<{ text: string; citations: AiCitation[] }> =>
       ipcRenderer.invoke('ai:complete', payload)
   },
   aiAgents: {
@@ -244,7 +245,11 @@ const api = {
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('aiAgents:delete', id)
   },
   backup: {
-    save: (): Promise<{ ok: boolean; path?: string; error?: string }> => ipcRenderer.invoke('db:backup')
+    save: (): Promise<{ ok: boolean; path?: string; error?: string }> => ipcRenderer.invoke('db:backup'),
+    restore: (): Promise<
+      | { ok: true; path: string; exportedAt: string | null }
+      | { ok: false; error?: string; cancelled?: boolean }
+    > => ipcRenderer.invoke('db:restore')
   },
   shell: {
     openExternal: (url: string): void => ipcRenderer.send('app:open-external', url)

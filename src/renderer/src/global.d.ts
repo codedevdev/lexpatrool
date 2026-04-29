@@ -4,6 +4,7 @@ import type {
   AiProviderConfig,
   AiCompletePayload,
   AiAgentRecord,
+  AiCitation,
   BrowserImportPayload,
   ManualDomParseRulesV1,
   ArticleUpdatePayload
@@ -201,14 +202,20 @@ declare global {
         dock: (which: 'cheats' | 'collections', where: 'left' | 'right' | 'top-right' | 'center') => Promise<void>
       }
       ai: {
-        complete: (payload: AiCompletePayload) => Promise<{ text: string; citations: unknown[] }>
+        complete: (payload: AiCompletePayload) => Promise<{ text: string; citations: AiCitation[] }>
       }
       aiAgents: {
         list: () => Promise<AiAgentRecord[]>
         save: (row: Partial<AiAgentRecord> & { name: string }) => Promise<{ id: string }>
         delete: (id: string) => Promise<boolean>
       }
-      backup: { save: () => Promise<{ ok: boolean; path?: string; error?: string }> }
+      backup: {
+        save: () => Promise<{ ok: boolean; path?: string; error?: string }>
+        restore: () => Promise<
+          | { ok: true; path: string; exportedAt: string | null }
+          | { ok: false; error?: string; cancelled?: boolean }
+        >
+      }
       shell: { openExternal: (url: string) => void }
       seed: { run: () => Promise<boolean> }
       collections: {

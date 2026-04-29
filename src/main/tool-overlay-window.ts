@@ -338,6 +338,11 @@ export class ToolOverlayController {
     if (w && !w.isDestroyed()) w.webContents.send(channel, ...args)
   }
 
+  reloadIfOpen(): void {
+    const w = this.win
+    if (w && !w.isDestroyed()) w.webContents.reload()
+  }
+
   private applyTopZOrder(w: BrowserWindow): void {
     this.alwaysOnTopLevel = readOverlayAotLevel(this.getDb())
     this.applyAlwaysOnTopToWindow(w)

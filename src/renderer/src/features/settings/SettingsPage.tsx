@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { LEX_COMMUNITY_DISCORD_URL, LEX_GITHUB_ISSUES_URL } from '../../lib/app-links'
 import { humanizeAcceleratorForUi, keyboardEventToAccelerator } from '../../lib/hotkey-format'
 
 type HotkeyField = 'toggle' | 'search' | 'clickThrough' | 'cheatsOverlay' | 'collectionsOverlay'
@@ -41,6 +42,7 @@ export function SettingsPage(): JSX.Element {
   const [updateResult, setUpdateResult] = useState<Awaited<ReturnType<typeof window.lawHelper.update.check>> | null>(
     null
   )
+  const [backupBusy, setBackupBusy] = useState(false)
   const [notifyOnStartup, setNotifyOnStartup] = useState(true)
 
   useEffect(() => {
@@ -143,6 +145,27 @@ export function SettingsPage(): JSX.Element {
     }
   }
 
+  async function restoreBackup(): Promise<void> {
+    const ok = window.confirm(
+      'Импорт заменит текущую базу LexPatrol данными из файла.\n\n' +
+        'Рекомендуется сначала сохранить резервную копию текущего состояния.\n\n' +
+        'Продолжить?'
+    )
+    if (!ok) return
+    setBackupBusy(true)
+    try {
+      const r = await window.lawHelper.backup.restore()
+      if (!r.ok) {
+        if (r.cancelled) return
+        alert(r.error ?? 'Не удалось импортировать файл.')
+        return
+      }
+      /* Главное окно перезагружается из main — этот код часто не выполнится */
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
   async function checkUpdatesManual(): Promise<void> {
     setUpdateBusy(true)
     setUpdateInfo(null)
@@ -196,8 +219,8 @@ export function SettingsPage(): JSX.Element {
             всех окон»; те же параметры можно менять на панели оверлея — они синхронизированы.
           </li>
           <li>
-            <span className="text-white/85">Резервная копия</span> — экспорт базы в файл в конце страницы; сохраните перед переездом
-            на другой ПК или переустановкой приложения.
+            <span className="text-white/85">Резервная копия</span> — экспорт в JSON и импорт с другого ПК или после
+            переустановки; в файл входят документы, статьи, закладки, заметки, подборки, шпаргалки, настройки и т.д.
           </li>
         </ul>
       </section>
@@ -281,6 +304,34 @@ export function SettingsPage(): JSX.Element {
         <p className="text-[11px] text-app-muted">
           «Позже» скрывает напоминание для этой версии; когда появится ещё более новая — уведомление снова покажется (если
           включено напоминание при запуске).
+        </p>
+      </section>
+
+      <section className="glass space-y-4 rounded-2xl p-6">
+        <h2 className="text-sm font-semibold text-white">Сообщество и поддержка</h2>
+        <p className="text-sm leading-relaxed text-app-muted">
+          Вопросы по программе, помощь с настройкой и обратная связь — в Discord-сообществе LexPatrol. Там же можно обсудить
+          идеи и поделиться опытом использования оверлея и базы.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void window.lawHelper.shell.openExternal(LEX_COMMUNITY_DISCORD_URL)}
+            className="rounded-lg border border-[#5865F2]/40 bg-[#5865F2]/15 px-4 py-2 text-sm font-medium text-white hover:bg-[#5865F2]/25"
+          >
+            Открыть Discord
+          </button>
+          <button
+            type="button"
+            onClick={() => void window.lawHelper.shell.openExternal(LEX_GITHUB_ISSUES_URL)}
+            className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/[0.06]"
+          >
+            Issues на GitHub
+          </button>
+        </div>
+        <p className="text-xs leading-relaxed text-app-muted">
+          Ошибки и предложения по коду удобно оформлять через <span className="text-white/80">Issues</span> на GitHub — так
+          проще отследить исправление в следующей версии.
         </p>
       </section>
 
@@ -391,98 +442,157 @@ export function SettingsPage(): JSX.Element {
         </div>
       </section>
 
-      <section className="glass space-y-4 rounded-2xl p-6">
-        <h2 className="text-sm font-semibold text-white">Окна: поверх других</h2>
-        <p className="text-xs text-app-muted">
-          Главное окно и оверлей настраиваются отдельно. Для оверлея можно повысить приоритет отображения, если его перекрывают
-          другие программы. В полноэкранном режиме игры с захватом экрана Windows может не показывать окна поверх — тогда
-          используйте оконный или безрамочный режим игры.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-app-muted">
-          <input
-            type="checkbox"
-            className="accent-accent"
-            checked={mainAlwaysOnTop}
-            onChange={(e) => setMainAlwaysOnTop(e.target.checked)}
-          />
-          Главное окно LexPatrol поверх других
-        </label>
-        <label className="block space-y-1.5 text-sm text-app-muted">
-          Оверлей — уровень «поверх»
-          <select
-            value={overlayAotLevel}
-            onChange={(e) =>
-              setOverlayAotLevel(e.target.value as 'off' | 'floating' | 'screen-saver' | 'pop-up-menu')
-            }
-            className="mt-1 w-full max-w-md rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-accent/50"
-          >
-            <option value="off">Выкл. (как обычное окно)</option>
-            <option value="floating">Стандарт (floating)</option>
-            <option value="screen-saver">Выше (screen-saver)</option>
-            <option value="pop-up-menu">Максимально (pop-up-menu)</option>
-          </select>
-        </label>
-      </section>
+      <section className="glass space-y-5 rounded-2xl p-6">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Окна поверх игры и оверлей</h2>
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-app-muted">
+            Главное окно LexPatrol, оверлей закрепов и отдельные окна шпаргалок / подборок — разные окна. Ниже — что относится к
+            оверлею закрепов и главному окну. Горячие клавиши для шпаргалок и подборок задаются в таблице выше.
+          </p>
+        </div>
 
-      <section className="glass space-y-4 rounded-2xl p-6">
-        <h2 className="text-sm font-semibold text-white">Оверлей (синхрон с главным окном)</h2>
-        <p className="text-xs text-app-muted">
-          Прозрачность и режим «клики проходят в игру» совпадают с панелью оверлея. Там же переключатель «В оверлей» / «В игру»
-          и горячая клавиша ({hkDisplay.clickThrough}).
-        </p>
-        <label className="block space-y-2 text-xs text-app-muted">
-          Прозрачность
-          <input
-            type="range"
-            min={0.28}
-            max={1}
-            step={0.01}
-            value={opacity}
-            onChange={(e) => setOpacity(Number(e.target.value))}
-            className="h-2 w-full accent-accent"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-sm text-app-muted">
-          <input type="checkbox" className="accent-accent" checked={clickThrough} onChange={(e) => setClickThrough(e.target.checked)} />
-          Пропуск кликов сквозь окно оверлея
-        </label>
-        <div className="flex flex-wrap gap-2 pt-2">
-          <button
-            type="button"
-            onClick={() => void window.lawHelper.overlay.show()}
-            className="rounded-lg border border-white/10 bg-surface-raised px-4 py-2 text-sm text-white hover:bg-surface-hover"
-          >
-            Показать оверлей
-          </button>
-          <button
-            type="button"
-            onClick={() => void window.lawHelper.overlay.hide()}
-            className="rounded-lg border border-white/10 bg-surface-raised px-4 py-2 text-sm text-white hover:bg-surface-hover"
-          >
-            Скрыть оверлей
-          </button>
-          <button
-            type="button"
-            onClick={() => void window.lawHelper.overlay.raise()}
-            className="rounded-lg border border-accent/30 bg-accent/10 px-4 py-2 text-sm text-accent hover:bg-accent/20"
-          >
-            Поверх всех окон
-          </button>
+        <div className="space-y-4 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-5">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-app-muted">Главное окно</h3>
+          <p className="text-xs text-app-muted">
+            Удобно, если LexPatrol должен оставаться поверх браузера или блокнота при работе с текстами. На игру влияет слабее,
+            чем настройки оверлея.
+          </p>
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-accent"
+              checked={mainAlwaysOnTop}
+              onChange={(e) => setMainAlwaysOnTop(e.target.checked)}
+            />
+            <span className="text-sm text-app-muted">
+              <span className="font-medium text-white">Держать главное окно поверх других окон</span>
+              <span className="mt-1 block text-xs leading-relaxed opacity-90">
+                Сохраняется в базе; после перезапуска приложения восстанавливается.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div className="space-y-4 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-5">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-app-muted">Оверлей закрепов</h3>
+          <p className="text-xs text-app-muted">
+            Отдельное полупрозрачное окно с закреплёнными статьями. Те же параметры можно менять на панели оверлея — значения
+            синхронизируются с этой страницей.
+          </p>
+
+          <label className="block space-y-1.5 text-sm text-app-muted">
+            <span className="text-xs font-medium text-white/90">Уровень «поверх других окон»</span>
+            <span className="block text-[11px] leading-relaxed text-app-muted/95">
+              Если оверлей уходит под игру или другие программы — выберите выше ступень. В полноэкранной игре с эксклюзивным
+              полноэкранным режимом Windows часто не показывает сторонние окна — попробуйте оконный или безрамочный режим игры.
+            </span>
+            <select
+              value={overlayAotLevel}
+              onChange={(e) =>
+                setOverlayAotLevel(e.target.value as 'off' | 'floating' | 'screen-saver' | 'pop-up-menu')
+              }
+              className="mt-1 w-full max-w-md rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-accent/50"
+            >
+              <option value="off">Выкл. (как обычное окно)</option>
+              <option value="floating">Стандарт (floating)</option>
+              <option value="screen-saver">Выше (screen-saver)</option>
+              <option value="pop-up-menu">Максимально (pop-up-menu)</option>
+            </select>
+          </label>
+
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-medium text-white/90">Прозрачность окна</label>
+              <span className="font-mono text-xs text-app-muted">{Math.round(opacity * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0.28}
+              max={1}
+              step={0.01}
+              value={opacity}
+              onChange={(e) => setOpacity(Number(e.target.value))}
+              className="h-2 w-full accent-accent"
+            />
+            <p className="text-[11px] text-app-muted">Слишком низкое значение делает текст труднее читаемым поверх игры.</p>
+          </div>
+
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-accent"
+              checked={clickThrough}
+              onChange={(e) => setClickThrough(e.target.checked)}
+            />
+            <span className="text-sm text-app-muted">
+              <span className="font-medium text-white">Пропускать клики сквозь оверлей в игру</span>
+              <span className="mt-1 block text-xs leading-relaxed opacity-90">
+                Когда включено, клики проходят в игру; на панели оверлея тот же режим переключается кнопкой или горячей клавишей{' '}
+                <span className="font-mono text-white/80">{hkDisplay.clickThrough}</span>.
+              </span>
+            </span>
+          </label>
+
+          <div className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-4">
+            <button
+              type="button"
+              onClick={() => void window.lawHelper.overlay.show()}
+              className="rounded-lg border border-white/10 bg-surface-raised px-4 py-2 text-sm text-white hover:bg-surface-hover"
+            >
+              Показать оверлей
+            </button>
+            <button
+              type="button"
+              onClick={() => void window.lawHelper.overlay.hide()}
+              className="rounded-lg border border-white/10 bg-surface-raised px-4 py-2 text-sm text-white hover:bg-surface-hover"
+            >
+              Скрыть оверлей
+            </button>
+            <button
+              type="button"
+              onClick={() => void window.lawHelper.overlay.raise()}
+              className="rounded-lg border border-accent/30 bg-accent/10 px-4 py-2 text-sm text-accent hover:bg-accent/20"
+            >
+              Вынести оверлей на передний план
+            </button>
+          </div>
         </div>
       </section>
 
       <section className="glass space-y-4 rounded-2xl p-6">
-        <h2 className="text-sm font-semibold text-white">Резервное копирование</h2>
-        <p className="text-sm text-app-muted">
-          Сохраните копию базы в файл для переноса на другой компьютер или резервной архивации.
+        <h2 className="text-sm font-semibold text-white">Резервная копия базы</h2>
+        <p className="max-w-3xl text-sm leading-relaxed text-app-muted">
+          Файл JSON содержит все данные LexPatrol на этом компьютере: документы и статьи, источники, теги, закладки, заметки,
+          подборки, шпаргалки, закрепы оверлея, настройки приложения (в т.ч. горячие клавиши и параметры оверлея), агентов ИИ и
+          прочее. Формат версии 1 — его же можно импортировать обратно.
         </p>
-        <button
-          type="button"
-          onClick={() => void backup()}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dim"
-        >
-          Сохранить бэкап…
-        </button>
+        <ul className="list-inside list-disc space-y-1.5 text-xs text-app-muted">
+          <li>
+            <span className="text-white/85">Экспорт</span> — сохраните файл в надёжное место или перенесите на другой ПК.
+          </li>
+          <li>
+            <span className="text-white/85">Импорт</span> — полностью заменяет текущую базу содержимым файла. Сделайте экспорт
+            текущих данных, если они ещё нужны.
+          </li>
+          <li>После успешного импорта интерфейс обновится автоматически (включая открытые окна оверлея, если они были).</li>
+        </ul>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => void backup()}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dim"
+          >
+            Сохранить копию в файл…
+          </button>
+          <button
+            type="button"
+            disabled={backupBusy}
+            onClick={() => void restoreBackup()}
+            className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-100 hover:bg-amber-500/20 disabled:opacity-50"
+          >
+            {backupBusy ? 'Импорт…' : 'Импорт из файла…'}
+          </button>
+        </div>
       </section>
     </div>
   )

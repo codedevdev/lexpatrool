@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { CommandPalette } from './CommandPalette'
+import { LEX_COMMUNITY_DISCORD_URL } from '../lib/app-links'
 import brandLogo from '../assets/brand-logo.png'
 
 const nav = [
@@ -122,6 +123,19 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             >
               Окно подборок
             </button>
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-3">
+              <p className="text-[11px] font-medium text-white/90">Сообщество</p>
+              <p className="mt-1 text-[10px] leading-relaxed text-app-muted">
+                Поддержка, вопросы и обсуждения LexPatrol в Discord.
+              </p>
+              <button
+                type="button"
+                onClick={() => void window.lawHelper.shell.openExternal(LEX_COMMUNITY_DISCORD_URL)}
+                className="mt-2 w-full rounded-lg border border-[#5865F2]/40 bg-[#5865F2]/15 px-3 py-2 text-xs font-medium text-white hover:bg-[#5865F2]/25"
+              >
+                Discord
+              </button>
+            </div>
           </div>
         </aside>
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3'
-import { buildMatchSnippet, extractSearchTokens } from '../shared/search-tokens'
+import { buildMatchSnippet, buildMatchSnippetMulti, extractSearchTokens } from '../shared/search-tokens'
 
 export interface RetrievalChunk {
   articleId: string
@@ -153,20 +153,48 @@ function fallbackLikePhrase(db: Database, phrase: string, limit: number, tagIds?
     .all(like, like, ...tagParams, limit) as FtsRow[]
 }
 
-function rowToChunk(r: FtsRow): RetrievalChunk {
+/** Длина выдержки из тела статьи для контекста ИИ и списков поиска (вокруг совпадения с запросом). */
+const CHUNK_EXCERPT_MAX = 4200
+
+function excerptForChunk(body: string, query: string): string {
+  const tokens = extractSearchTokens(query)
+  if (tokens.length >= 2) {
+    return buildMatchSnippetMulti(body, tokens, CHUNK_EXCERPT_MAX)
+  }
+  if (tokens.length === 1) {
+    return buildMatchSnippet(body, tokens, CHUNK_EXCERPT_MAX)
+  }
+  const q = query.trim()
+  if (q.length >= 2) {
+    return buildMatchSnippet(body, [q], CHUNK_EXCERPT_MAX)
+  }
+  return body.length <= CHUNK_EXCERPT_MAX ? body : `${body.slice(0, CHUNK_EXCERPT_MAX)}…`
+}
+
+function rowToChunk(r: FtsRow, query: string): RetrievalChunk {
   return {
     articleId: r.article_id,
     documentId: r.document_id,
     documentTitle: r.document_title,
     heading: r.heading,
     articleNumber: r.article_number,
-    body: r.body_clean.slice(0, 12000)
+    body: excerptForChunk(r.body_clean, query)
   }
 }
 
 export type RetrieveOptions = {
   /** Ограничить выдачу статьями с любым из перечисленных тегов (id из таблицы tags). */
   tagIds?: string[]
+  /**
+   * Не более стольких статей из одного документа (баланс: один кодекс не забирает все слоты контекста).
+   * По умолчанию 4.
+   */
+  maxPerDocument?: number
+}
+
+/** Сколько строк запрашивать у FTS за один проход — с запасом из-за отсечения по документу и дубликатам. */
+function ftsCandidateLimit(need: number): number {
+  return Math.min(220, Math.max(need * 14, 56))
 }
 
 /** Полнотекстовый и резервный поиск по статьям для оверлея, базы и ИИ. */
@@ -180,38 +208,44 @@ export function retrieveChunksForQuery(
   const raw = query.trim().replace(/\s+/g, ' ')
   if (!raw) return []
 
+  const maxPerDoc = Math.min(30, Math.max(1, options?.maxPerDocument ?? 4))
   const tokens = extractSearchTokens(raw)
   const seen = new Set<string>()
+  const docCount = new Map<string, number>()
   const chunks: RetrievalChunk[] = []
 
   const pushRows = (rows: FtsRow[]): void => {
     for (const r of rows) {
       if (seen.has(r.article_id)) continue
+      const n = docCount.get(r.document_id) ?? 0
+      if (n >= maxPerDoc) continue
       seen.add(r.article_id)
-      chunks.push(rowToChunk(r))
+      docCount.set(r.document_id, n + 1)
+      chunks.push(rowToChunk(r, raw))
       if (chunks.length >= limit) break
     }
   }
 
   if (tokens.length > 0) {
     const variants = ftsMatchVariants(tokens)
+    const fetchN = ftsCandidateLimit(limit)
     for (const m of variants) {
       if (chunks.length >= limit) break
-      const rows = runFts(db, m, limit, tagIds)
+      const rows = runFts(db, m, fetchN, tagIds)
       pushRows(rows)
     }
 
     if (chunks.length < limit) {
-      const more = fallbackLikeMulti(db, tokens, limit - chunks.length, seen, tagIds)
+      const more = fallbackLikeMulti(db, tokens, fetchN, seen, tagIds)
       pushRows(more)
     }
   }
 
   if (chunks.length < limit && raw.length >= 2) {
-    const more = fallbackLikePhrase(db, raw, limit - chunks.length + seen.size, tagIds).filter(
+    const more = fallbackLikePhrase(db, raw, ftsCandidateLimit(limit + seen.size), tagIds).filter(
       (r) => !seen.has(r.article_id)
     )
-    pushRows(more.slice(0, limit - chunks.length))
+    pushRows(more)
   }
 
   return chunks.slice(0, limit)

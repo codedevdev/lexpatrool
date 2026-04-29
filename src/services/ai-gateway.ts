@@ -126,25 +126,51 @@ export async function completeChat(
 
 export function buildSystemPrompt(
   allowBroader: boolean,
-  contextChunks: { heading: string; documentTitle: string; body: string; articleId: string }[],
+  contextChunks: {
+    heading: string
+    documentTitle: string
+    body: string
+    articleId: string
+    articleNumber?: string | null
+  }[],
   agentExtra?: string | null
 ): string {
-  const base = `Ты помощник по материалам, импортированным пользователем в приложение LexPatrol (локальная база для RP-сценариев).
-Всегда опирайся на приведённый контекст. Если ответа нет в контексте — скажи об этом явно.
-Укажи предупреждение: ответ может быть неточным; проверяй оригинальные статьи.
-Формат ссылок: [ID статьи] в конце предложения при цитировании.`
+  const MAX_FRAGMENT = 4000
 
-  const ctx = contextChunks
-    .map(
-      (c, i) =>
-        `--- Фрагмент ${i + 1} | Документ: ${c.documentTitle} | ${c.heading} | id=${c.articleId} ---\n${c.body.slice(0, 3500)}`
-    )
-    .join('\n\n')
+  const base = `Ты текстовый помощник в приложении LexPatrol для игроков GTA V RP, FiveM и похожих ролевых серверов.
+Ниже в этом сообщении — фрагменты только из ЕГО ЛОКАЛЬНОЙ базы на ПК: то, что он сам импортировал (часто «кодексы», уставы и правила конкретного RP-проекта, учебные или игровые формулировки). Это не запрос реальной юридической консультации по законодательству какой-либо страны.
+
+Правила:
+- Отвечай, опираясь только на эти фрагменты. Если в них нет нужного — скажи, что в импортированной базе этого нет.
+- НЕ используй шаблоны вроде «не могу давать юридические консультации», «информация не является юридической рекомендацией», «обратитесь к квалифицированному юристу» и т.п.: для RP-сценария это вводит в заблуждение. Если уместно напомнить границы — одной короткой фразой: ответ только по материалам из LexPatrol и про игровой/серверный контекст, а не про законы государств в реальности.
+- При желании одной фразой: сверяй формулировки с полным текстом статьи в читателе приложения.
+- Каждый фрагмент ниже помечен id=<uuid>. Ссылаясь на норму из фрагмента, добавляй в конце соответствующей фразы id=<тот же uuid>. Не указывай id статей, которых не было во фрагментах.`
 
   const persona =
     agentExtra?.trim() ?
       `\n\n--- Доп. инструкции пользовательского агента ---\n${agentExtra.trim()}`
     : ''
+
+  if (contextChunks.length === 0) {
+    if (allowBroader) {
+      return `${base}${persona}
+
+По этому запросу поиск по базе не вернул ни одной статьи (контекст пуст). Сообщи об этом пользователю. Не выдумывай тексты норм и не указывай id=. Ты можешь дать только общие подсказки (интерфейс, RP), явно отделив их от «законов из базы».`
+    }
+    return `${base}${persona}
+
+По этому запросу поиск по базе не вернул ни одной статьи (контекст пуст). Ответь, что в импортированных материалах нет подходящих фрагментов; не придумывай статьи и не используй id=.`
+  }
+
+  const ctx = contextChunks
+    .map((c, i) => {
+      const num = c.articleNumber?.trim()
+      const titleLine = num ? `Статья №${num} — ${c.heading}` : c.heading
+      const body =
+        c.body.length <= MAX_FRAGMENT ? c.body : `${c.body.slice(0, MAX_FRAGMENT)}…`
+      return `--- Фрагмент ${i + 1} | Документ: ${c.documentTitle} | ${titleLine} | id=${c.articleId} ---\n${body}`
+    })
+    .join('\n\n')
 
   if (allowBroader) {
     return `${base}${persona}\n\nКонтекст из базы:\n${ctx}\n\nТы можешь добавить общие разъяснения, явно помечая их как не из импортированных материалов.`
@@ -154,17 +180,27 @@ export function buildSystemPrompt(
 
 export function parseCitationsFromAnswer(
   answer: string,
-  chunks: { articleId: string; documentTitle: string; heading: string; articleNumber: string | null }[]
+  chunks: {
+    articleId: string
+    documentId: string
+    documentTitle: string
+    heading: string
+    articleNumber: string | null
+  }[]
 ): AiCitation[] {
   const cited: AiCitation[] = []
+  const seen = new Set<string>()
   const idPattern = /id=([a-f0-9-]{36})/gi
   let m: RegExpExecArray | null
   while ((m = idPattern.exec(answer)) !== null) {
-    const id = m[1]
+    const id = m[1]!
+    if (seen.has(id)) continue
     const ch = chunks.find((c) => c.articleId === id)
     if (ch) {
+      seen.add(id)
       cited.push({
         articleId: ch.articleId,
+        documentId: ch.documentId,
         documentTitle: ch.documentTitle,
         articleLabel: ch.articleNumber ? `Статья ${ch.articleNumber}` : ch.heading,
         excerpt: ch.heading

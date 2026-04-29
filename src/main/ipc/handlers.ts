@@ -1,19 +1,8 @@
 import { app, ipcMain, dialog, globalShortcut } from 'electron'
 import { setMainWindowAlwaysOnTop } from '../window-always-on-top'
 import type { BrowserWindow } from 'electron'
-import { writeFileSync } from 'fs'
+import { writeFileSync, readFileSync } from 'fs'
 import type { Database } from 'better-sqlite3'
-
-type AiAgentRow = {
-  id: string
-  system_prompt_extra: string
-  temperature: number | null
-  max_tokens: number | null
-  model: string | null
-  provider: string | null
-  base_url: string | null
-  api_key: string | null
-}
 
 function mergeAgentConfig(
   db: Database,
@@ -21,19 +10,11 @@ function mergeAgentConfig(
   agentId?: string | null
 ): { cfg: AiProviderConfig; extra: string } {
   if (!agentId) return { cfg: base, extra: '' }
-  const row = db.prepare('SELECT * FROM ai_agents WHERE id = ?').get(agentId) as AiAgentRow | undefined
+  const row = db
+    .prepare('SELECT system_prompt_extra FROM ai_agents WHERE id = ?')
+    .get(agentId) as { system_prompt_extra: string } | undefined
   if (!row) return { cfg: base, extra: '' }
-  const cfg: AiProviderConfig = { ...base }
-  if (row.model?.trim()) cfg.model = row.model
-  if (row.temperature != null && !Number.isNaN(row.temperature)) cfg.temperature = row.temperature
-  if (row.max_tokens != null && row.max_tokens > 0) cfg.maxTokens = row.max_tokens
-  const p = row.provider?.trim()
-  if (p && ['openai', 'anthropic', 'gemini', 'ollama', 'openai_compatible'].includes(p)) {
-    cfg.provider = p as AiProviderConfig['provider']
-  }
-  if (row.base_url?.trim()) cfg.baseUrl = row.base_url
-  if (row.api_key?.trim()) cfg.apiKey = row.api_key
-  return { cfg, extra: row.system_prompt_extra ?? '' }
+  return { cfg: base, extra: row.system_prompt_extra ?? '' }
 }
 import { v4 as uuid } from 'uuid'
 import type {
@@ -73,6 +54,8 @@ import {
 } from '../global-shortcuts'
 import { seedIfEmpty } from '../seed'
 import { checkForUpdates, getUpdateRepoLabel } from '../update-check'
+import { LEX_BACKUP_TABLE_ORDER } from '../backup-tables'
+import { parseBackupJson, restoreDatabaseFromBackupData } from '../backup-restore'
 
 export interface IpcContext {
   getMainWindow: () => BrowserWindow | null
@@ -104,6 +87,15 @@ function ensureTagByName(db: Database, name: string): string | null {
 export function registerIpcHandlers(ctx: IpcContext): void {
   const { getDb, overlay, cheatToolOverlay, collectionToolOverlay, getMainWindow } = ctx
 
+  function reloadAppRenderersAfterDbRestore(): void {
+    const mw = getMainWindow()
+    if (mw && !mw.isDestroyed()) mw.webContents.reload()
+    overlay.reloadIfOpen()
+    cheatToolOverlay.reloadIfOpen()
+    collectionToolOverlay.reloadIfOpen()
+    applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, getDb())
+  }
+
   ipcMain.handle('app:get-version', async () => {
     return app.getVersion()
   })
@@ -125,33 +117,8 @@ export function registerIpcHandlers(ctx: IpcContext): void {
         : await dialog.showSaveDialog(opts)
     if (!filePath) return { ok: false }
     const db = getDb()
-    const tables = [
-      'categories',
-      'sources',
-      'documents',
-      'sections',
-      'articles',
-      'clauses',
-      'tags',
-      'document_tags',
-      'article_tag_assignments',
-      'bookmarks',
-      'notes',
-      'retrieval_chunks',
-      'ai_conversations',
-      'ai_messages',
-      'app_settings',
-      'overlay_pins',
-      'import_jobs',
-      'ai_agents',
-      'article_collections',
-      'article_collection_items',
-      'article_see_also',
-      'cheat_sheets',
-      'reader_recents'
-    ] as const
     const dump: Record<string, unknown[]> = {}
-    for (const t of tables) {
+    for (const t of LEX_BACKUP_TABLE_ORDER) {
       dump[t] = db.prepare(`SELECT * FROM ${t}`).all()
     }
     try {
@@ -163,6 +130,49 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       return { ok: false, error: message }
     }
   })
+
+  ipcMain.handle(
+    'db:restore',
+    async (): Promise<
+      | { ok: true; path: string; exportedAt: string | null }
+      | { ok: false; error?: string; cancelled?: boolean }
+    > => {
+      const win = getMainWindow()
+      const { canceled, filePaths } =
+        win != null && !win.isDestroyed()
+          ? await dialog.showOpenDialog(win, {
+              title: 'Импорт резервной копии',
+              filters: [{ name: 'JSON', extensions: ['json'] }],
+              properties: ['openFile']
+            })
+          : await dialog.showOpenDialog({
+              title: 'Импорт резервной копии',
+              filters: [{ name: 'JSON', extensions: ['json'] }],
+              properties: ['openFile']
+            })
+      if (canceled) return { ok: false, cancelled: true }
+      const filePath = filePaths[0]
+      if (!filePath) return { ok: false, cancelled: true }
+      let raw: string
+      try {
+        raw = readFileSync(filePath, 'utf-8')
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        return { ok: false, error: `Не удалось прочитать файл: ${message}` }
+      }
+      const parsed = parseBackupJson(raw)
+      if (!parsed.ok) return { ok: false, error: parsed.error }
+      try {
+        restoreDatabaseFromBackupData(getDb(), parsed.data)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        console.error('[LexPatrol] db:restore', e)
+        return { ok: false, error: `Импорт не выполнен: ${message}` }
+      }
+      reloadAppRenderersAfterDbRestore()
+      return { ok: true, path: filePath, exportedAt: parsed.exportedAt }
+    }
+  )
 
   ipcMain.handle('settings:get', (_e, key: string) => {
     const row = getDb().prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
@@ -581,13 +591,23 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     const db = getDb()
     const { cfg: baseCfg, question: userQuestion, agentId } = payload
     const { cfg, extra } = mergeAgentConfig(db, baseCfg, agentId)
-    const chunks = retrieveChunksForQuery(db, userQuestion, 10)
-    const sys = buildSystemPrompt(Boolean(cfg.allowBroaderContext), chunks, extra)
+    const chunks = retrieveChunksForQuery(db, userQuestion, 12, { maxPerDocument: 3 })
+    const sys = buildSystemPrompt(
+      Boolean(cfg.allowBroaderContext),
+      chunks.map((c) => ({
+        heading: c.heading,
+        documentTitle: c.documentTitle,
+        body: c.body,
+        articleId: c.articleId,
+        articleNumber: c.articleNumber
+      })),
+      extra
+    )
     const messages: AiMessage[] = [
       { role: 'system', content: sys },
       {
         role: 'user',
-        content: `${userQuestion}\n\nВ ответе укажи ссылки на статьи в формате id=<uuid> из контекста.`
+        content: `Вопрос:\n${userQuestion}\n\nСледуй системному сообщению. Где опираешься на фрагмент из контекста — укажи id=<uuid> из заголовка этого фрагмента.`
       }
     ]
     const result = await completeChat(cfg, messages)
@@ -595,6 +615,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       result.text,
       chunks.map((c) => ({
         articleId: c.articleId,
+        documentId: c.documentId,
         documentTitle: c.documentTitle,
         heading: c.heading,
         articleNumber: c.articleNumber
