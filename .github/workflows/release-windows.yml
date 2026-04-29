@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Нужна полная история и теги: текст аннотированного тега и вызов API generate-notes
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,13 +38,39 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # Текст сверху — сообщение аннотированного тега (`git tag -a`) или commit message (lightweight tag).
+      # Ниже — тот же автоген, что в UI («Generate release notes»), с учётом .github/release.yml
+      - name: Compose release description (tag message + GitHub changelog)
+        id: release_body
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          CUSTOM=$(git for-each-ref --format='%(contents)' "refs/tags/${TAG}" 2>/dev/null || true)
+          if [ -z "${CUSTOM//[$'\t\r\n ']}" ]; then
+            CUSTOM=$(git show -s --format=%B "${GITHUB_SHA}")
+          fi
+          GEN=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f "tag_name=${TAG}" \
+            --jq .body 2>/dev/null || echo "")
+          {
+            echo "body<<REL_BODY_EOF"
+            printf '%s\n' "${CUSTOM}"
+            if [ -n "${GEN}" ]; then
+              printf '\n---\n\n%s\n' "${GEN}"
+            fi
+            echo "REL_BODY_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Upload installers to GitHub Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/')
-        # Текст релиза: GitHub генерирует заметки по API (PR, контрибьюторы). Шаблон секций — .github/release.yml
         uses: softprops/action-gh-release@v2
         with:
           draft: false
-          generate_release_notes: true
+          body: ${{ steps.release_body.outputs.body }}
+          generate_release_notes: false
           fail_on_unmatched_files: true
           files: |
             LexPatrool-bin/LexPatrol Setup *.exe
