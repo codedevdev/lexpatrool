@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import type { ImportPayload, SourceType } from '@shared/types'
 
 type ArticleFilter = NonNullable<ImportPayload['articleFilter']>
@@ -59,6 +59,9 @@ const PIPELINE_PHASES: { title: string; detail: string }[] = [
 
 export function ImportPage(): JSX.Element {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const replaceDocumentId = useMemo(() => searchParams.get('replace')?.trim() ?? '', [searchParams])
+
   const [step, setStep] = useState(1)
   const [title, setTitle] = useState('Новый импорт')
   const [text, setText] = useState('')
@@ -116,13 +119,35 @@ export function ImportPage(): JSX.Element {
     timers.push(setTimeout(() => setPipelinePhase(2), 720))
 
     try {
-      const res = await window.lawHelper.import.payload(payload)
+      let documentId: string
+      if (replaceDocumentId) {
+        const res = await window.lawHelper.import.replaceDocument({
+          documentId: replaceDocumentId,
+          ...payload
+        })
+        if (!res.ok) {
+          const msg =
+            res.error === 'document_not_found'
+              ? 'Документ не найден.'
+              : res.error === 'no_source'
+                ? 'У документа нет источника для обновления.'
+                : `Ошибка: ${res.error}`
+          timers.forEach(clearTimeout)
+          setError(msg)
+          setPipelinePhase(0)
+          return
+        }
+        documentId = res.documentId
+      } else {
+        const res = await window.lawHelper.import.payload(payload)
+        documentId = res.documentId
+      }
       timers.forEach(clearTimeout)
       setPipelinePhase(3)
       await sleep(480)
       setOverlayOpen(false)
       setPipelinePhase(0)
-      navigate(`/reader/${res.documentId}`)
+      navigate(`/reader/${documentId}`)
     } catch (err) {
       timers.forEach(clearTimeout)
       setError(err instanceof Error ? err.message : 'Ошибка импорта')
@@ -130,7 +155,7 @@ export function ImportPage(): JSX.Element {
     } finally {
       setBusy(false)
     }
-  }, [articleFilter, navigate, sourceType, split, text, title, url])
+  }, [articleFilter, navigate, replaceDocumentId, sourceType, split, text, title, url])
 
   const closeOverlay = useCallback(() => {
     if (busy) return
@@ -147,6 +172,23 @@ export function ImportPage(): JSX.Element {
         <div className="relative">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent/90">Локальная база</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-[1.75rem]">Импорт материалов</h1>
+          {replaceDocumentId ? (
+            <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100/95">
+              Режим <strong className="text-white">обновления документа</strong>: после импорта статьи сопоставятся по
+              номеру и заголовку; при изменении текста сохранится предыдущая версия для сравнения в читателе. Закладки на
+              удалённые при сопоставлении статьи могут пропасть.
+              <span className="mt-1.5 block text-[11px] text-amber-100/75">
+                Нужен сайт с авторизацией? То же обновление — во встроенном{' '}
+                <Link
+                  className="font-medium text-white underline decoration-white/30 hover:decoration-white/60"
+                  to={`/browser?replace=${encodeURIComponent(replaceDocumentId)}`}
+                >
+                  браузере
+                </Link>
+                .
+              </span>
+            </div>
+          ) : null}
           <p className="mt-3 max-w-3xl text-sm leading-relaxed text-app-muted">
             Текст или HTML обрабатываются в приложении: извлечение текста (в т.ч. Readability), разбор на статьи и запись в SQLite.
             Страницы с авторизацией удобнее открыть во встроенном{' '}

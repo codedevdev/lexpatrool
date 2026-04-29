@@ -68,3 +68,17 @@ function codeToAcceleratorToken(code: string): string | null {
   }
   return map[code] ?? null
 }
+
+/** Читаемая подпись для таблицы настроек (как в main `humanizeAccelerator`). */
+export function humanizeAcceleratorForUi(acc: string): string {
+  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+  return acc
+    .split('+')
+    .map((p) => {
+      if (p === 'CommandOrControl') return isMac ? '⌘' : 'Ctrl'
+      if (p === 'Command') return '⌘'
+      if (p === 'Control') return 'Ctrl'
+      return p
+    })
+    .join('+')
+}

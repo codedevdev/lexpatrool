@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import type { BrowserImportPayload, ManualDomParseRulesV1 } from '@shared/types'
 import type { SplitArticle } from '@parsers/article-split'
 import {
@@ -163,6 +163,8 @@ function SelKind({
 
 export function BrowserImportPage(): JSX.Element {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const replaceDocumentId = useMemo(() => searchParams.get('replace')?.trim() ?? '', [searchParams])
   const [step, setStep] = useState(1)
   const [url, setUrl] = useState('https://example.com')
   const [busy, setBusy] = useState(false)
@@ -374,10 +376,24 @@ export function BrowserImportPage(): JSX.Element {
         title: snap.title,
         mode: form.importMode,
         articleFilter: form.articleFilter,
+        ...(replaceDocumentId ? { replaceDocumentId } : {}),
         ...(form.importMode === 'auto' ? { forumScope: form.forumScope } : {}),
         ...(form.importMode === 'manual' ? { manualRules: buildRules(form) } : {})
       }
-      const res = (await window.lawHelper.import.browserPage(payload)) as { documentId: string }
+      const res = await window.lawHelper.import.browserPage(payload)
+      if (!res.ok) {
+        timers.forEach(clearTimeout)
+        setOverlayOpen(false)
+        setPipelinePhase(0)
+        setNote(
+          res.error === 'document_not_found'
+            ? 'Документ не найден.'
+            : res.error === 'no_source'
+              ? 'У документа нет источника для обновления.'
+              : `Ошибка: ${res.error}`
+        )
+        return
+      }
       persistForm(form)
       timers.forEach(clearTimeout)
       setPipelinePhase(3)
@@ -393,7 +409,7 @@ export function BrowserImportPage(): JSX.Element {
     } finally {
       setBusy(false)
     }
-  }, [form, navigate, persistForm])
+  }, [form, navigate, persistForm, replaceDocumentId])
 
   function update<K extends keyof SavedForm>(key: K, v: SavedForm[K]): void {
     setForm((prev) => ({ ...prev, [key]: v }))
@@ -449,6 +465,13 @@ export function BrowserImportPage(): JSX.Element {
         <div className="relative">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent/90">Встроенный Chromium</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-[1.65rem]">Браузерный импорт</h1>
+          {replaceDocumentId ? (
+            <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100/95">
+              Режим <strong className="text-white">обновления документа</strong>: текущая страница заменит сырой HTML и
+              текст в базе; статьи сопоставятся по номеру и заголовку, при изменении текста сохранится предыдущая версия
+              для сравнения в читателе. Удобно, если сайт требует входа во встроенном браузере.
+            </div>
+          ) : null}
           <p className="mt-3 max-w-3xl text-sm leading-relaxed text-app-muted">
             Загрузите страницу справа, войдите на сайт при необходимости — cookies сохраняются в профиле браузера LexPatrol.
             Дальше выберите: <strong className="text-white/85">авто</strong> (Readability и темы форумов) или{' '}
@@ -459,6 +482,18 @@ export function BrowserImportPage(): JSX.Element {
             <Link className="font-medium text-accent hover:underline" to="/import">
               Импорт
             </Link>
+            {replaceDocumentId ? (
+              <>
+                {' '}
+                · обновление <strong className="text-white/80">вставкой</strong> —{' '}
+                <Link
+                  className="font-medium text-accent hover:underline"
+                  to={`/import?replace=${encodeURIComponent(replaceDocumentId)}`}
+                >
+                  тот же документ в «Импорт»
+                </Link>
+              </>
+            ) : null}
             .
           </p>
         </div>

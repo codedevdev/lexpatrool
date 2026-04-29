@@ -1,9 +1,20 @@
 import { useEffect, useState } from 'react'
-import { keyboardEventToAccelerator } from '../../lib/hotkey-format'
+import { humanizeAcceleratorForUi, keyboardEventToAccelerator } from '../../lib/hotkey-format'
 
-type HotkeyField = 'toggle' | 'search' | 'clickThrough'
+type HotkeyField = 'toggle' | 'search' | 'clickThrough' | 'cheatsOverlay' | 'collectionsOverlay'
 
 const UPDATE_NOTIFY_KEY = 'update_notify_startup'
+
+const HOTKEY_ROW_META: Record<
+  HotkeyField,
+  { title: string; desc: string }
+> = {
+  toggle: { title: 'Оверлей закрепов', desc: 'Показать / скрыть оверлей закрепов' },
+  search: { title: 'Поиск по базе', desc: 'Открыть оверлей и фокус на поиске по базе' },
+  clickThrough: { title: 'Мышь: оверлей ↔ игра', desc: 'Переключить режим мыши: оверлей ↔ игра' },
+  cheatsOverlay: { title: 'Окно шпаргалок', desc: 'Показать / скрыть отдельное окно шпаргалок' },
+  collectionsOverlay: { title: 'Окно подборок', desc: 'Показать / скрыть отдельное окно подборок' }
+}
 
 export function SettingsPage(): JSX.Element {
   const [opacity, setOpacity] = useState(0.92)
@@ -16,9 +27,13 @@ export function SettingsPage(): JSX.Element {
   const [hkDisplay, setHkDisplay] = useState({
     toggle: 'Ctrl+Shift+Space',
     search: 'Ctrl+Shift+F',
-    clickThrough: 'Ctrl+Shift+G'
+    clickThrough: 'Ctrl+Shift+G',
+    cheatsOverlay: 'Ctrl+Shift+Y',
+    collectionsOverlay: 'Ctrl+Shift+U'
   })
+  const [hkDefaultsDisplay, setHkDefaultsDisplay] = useState({ ...hkDisplay })
   const [hkRecording, setHkRecording] = useState<HotkeyField | null>(null)
+  const [hkRecordingPreview, setHkRecordingPreview] = useState<string | null>(null)
   const [appVersion, setAppVersion] = useState('')
   const [updateRepo, setUpdateRepo] = useState('')
   const [updateBusy, setUpdateBusy] = useState(false)
@@ -37,12 +52,19 @@ export function SettingsPage(): JSX.Element {
   useEffect(() => {
     void window.lawHelper.hotkeys
       .get()
-      .then((h) => setHkDisplay(h.display))
+      .then((h) => {
+        setHkDisplay(h.display)
+        setHkDefaultsDisplay(h.defaultsDisplay)
+      })
       .catch(() => {})
   }, [])
 
   useEffect(() => {
-    if (!hkRecording) return
+    if (!hkRecording) {
+      setHkRecordingPreview(null)
+      return
+    }
+    setHkRecordingPreview(null)
     const onKey = (e: KeyboardEvent): void => {
       e.preventDefault()
       e.stopPropagation()
@@ -51,10 +73,14 @@ export function SettingsPage(): JSX.Element {
         return
       }
       const acc = keyboardEventToAccelerator(e)
+      if (acc) setHkRecordingPreview(humanizeAcceleratorForUi(acc))
       if (!acc) return
       void window.lawHelper.hotkeys.set({ [hkRecording]: acc }).then((r) => {
         if (r.ok) {
-          void window.lawHelper.hotkeys.get().then((h) => setHkDisplay(h.display))
+          void window.lawHelper.hotkeys.get().then((h) => {
+            setHkDisplay(h.display)
+            setHkDefaultsDisplay(h.defaultsDisplay)
+          })
         } else if (r.error === 'duplicate') {
           alert('Такое сочетание уже назначено другому действию.')
         } else {
@@ -112,6 +138,8 @@ export function SettingsPage(): JSX.Element {
     const r = await window.lawHelper.backup.save()
     if (r.ok && r.path) {
       alert(`Сохранено: ${r.path}`)
+    } else if (r.error) {
+      alert(`Не удалось сохранить резервную копию: ${r.error}`)
     }
   }
 
@@ -270,7 +298,10 @@ export function SettingsPage(): JSX.Element {
             className="rounded-lg border border-white/10 bg-surface-raised px-3 py-1.5 text-xs text-white hover:bg-surface-hover"
             onClick={() => {
               void window.lawHelper.hotkeys.resetDefaults().then(() => {
-                void window.lawHelper.hotkeys.get().then((h) => setHkDisplay(h.display))
+                void window.lawHelper.hotkeys.get().then((h) => {
+                  setHkDisplay(h.display)
+                  setHkDefaultsDisplay(h.defaultsDisplay)
+                })
               })
             }}
           >
@@ -279,27 +310,56 @@ export function SettingsPage(): JSX.Element {
         </div>
 
         {hkRecording ? (
-          <div className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-accent">
-            Запись: нажмите новое сочетание… (Esc — отмена)
+          <div className="space-y-1 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-accent">
+            <p>
+              Запись: <span className="font-medium text-white">{HOTKEY_ROW_META[hkRecording].title}</span> — нажмите новое
+              сочетание (Esc — отмена).
+            </p>
+            {hkRecordingPreview ? (
+              <p className="font-mono text-[11px] text-white/90">
+                Будет: <span className="text-accent">{hkRecordingPreview}</span>
+              </p>
+            ) : (
+              <p className="text-[11px] text-app-muted">Удерживайте Ctrl/Alt/Shift и нажмите клавишу.</p>
+            )}
           </div>
         ) : null}
 
         <div className="overflow-hidden rounded-xl border border-white/10">
           <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-white/10 bg-black/30 text-[11px] uppercase tracking-wide text-app-muted">
+                <th className="px-4 py-2 font-medium">Действие</th>
+                <th className="px-4 py-2 font-medium">Сейчас</th>
+                <th className="px-4 py-2 font-medium">Стандарт</th>
+                <th className="px-4 py-2 font-medium text-right"> </th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-white/5">
               {(
                 [
-                  ['toggle', hkDisplay.toggle, 'Показать / скрыть оверлей'],
-                  ['search', hkDisplay.search, 'Открыть оверлей и фокус на поиске по базе'],
-                  ['clickThrough', hkDisplay.clickThrough, 'Переключить режим мыши: оверлей ↔ игра']
+                  'toggle',
+                  'search',
+                  'clickThrough',
+                  'cheatsOverlay',
+                  'collectionsOverlay'
                 ] as const
-              ).map(([id, label, desc]) => (
+              ).map((id) => (
                 <tr key={id} className="bg-white/[0.02]">
-                  <td className="px-4 py-3">
-                    <span className="font-mono text-xs text-accent/90">{label}</span>
-                    <p className="mt-1 text-xs text-app-muted">{desc}</p>
+                  <td className="px-4 py-3 align-top">
+                    <span className="text-xs font-medium text-white/90">{HOTKEY_ROW_META[id].title}</span>
+                    <p className="mt-1 text-xs text-app-muted">{HOTKEY_ROW_META[id].desc}</p>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 align-top">
+                    <span className="font-mono text-xs text-white">{hkDisplay[id]}</span>
+                    {hkRecording === id && hkRecordingPreview ? (
+                      <p className="mt-1 font-mono text-[11px] text-accent/90">→ {hkRecordingPreview}</p>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <span className="font-mono text-xs text-white/50">{hkDefaultsDisplay[id]}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right align-top">
                     <button
                       type="button"
                       className={`rounded-lg border px-3 py-1.5 text-xs ${
@@ -316,11 +376,15 @@ export function SettingsPage(): JSX.Element {
               ))}
               <tr>
                 <td className="px-4 py-3 font-mono text-xs text-white/55">Esc</td>
-                <td className="px-4 py-3 text-app-muted">Скрыть оверлей (когда он в фокусе)</td>
+                <td className="px-4 py-3 text-app-muted" colSpan={3}>
+                  Скрыть оверлей или окно шпаргалок / подборок (в фокусе)
+                </td>
               </tr>
               <tr className="bg-white/[0.02]">
                 <td className="px-4 py-3 font-mono text-xs text-white/55">← →</td>
-                <td className="px-4 py-3 text-app-muted">Переключение закреплённых статей в оверлее (вне поля ввода)</td>
+                <td className="px-4 py-3 text-app-muted" colSpan={3}>
+                  Переключение закреплённых статей в оверлее (вне поля ввода)
+                </td>
               </tr>
             </tbody>
           </table>

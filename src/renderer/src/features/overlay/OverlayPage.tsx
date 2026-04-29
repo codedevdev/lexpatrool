@@ -124,6 +124,9 @@ function mapArticleGetToPinned(row: unknown): Pinned | null {
 
 const UI_KEY = 'overlay_ui_prefs'
 
+/** Прокрутка без системной полосы (оверлей поверх игры). */
+const ovScroll = 'lex-overlay-scroll'
+
 /** Компакт — мало места; чтение — крупнее текст при узком заголовке; панель — поиск и все опции. */
 export type OverlayLayoutPreset = 'compact' | 'reading' | 'full'
 
@@ -212,6 +215,8 @@ export function OverlayPage(): JSX.Element {
   const [filterLocal, setFilterLocal] = useState('')
   const [globalQ, setGlobalQ] = useState('')
   const debouncedGlobal = useDebounced(globalQ, 280)
+  const [tagFilterId, setTagFilterId] = useState('')
+  const [tagOptions, setTagOptions] = useState<{ id: string; name: string }[]>([])
   const [globalHits, setGlobalHits] = useState<SearchHit[]>([])
   const [globalOpen, setGlobalOpen] = useState(false)
   const [layoutPreset, setLayoutPreset] = useState<OverlayLayoutPreset>('full')
@@ -221,7 +226,9 @@ export function OverlayPage(): JSX.Element {
   const [hkDisp, setHkDisp] = useState({
     toggle: 'Ctrl+Shift+Space',
     search: 'Ctrl+Shift+F',
-    clickThrough: 'Ctrl+Shift+G'
+    clickThrough: 'Ctrl+Shift+G',
+    cheatsOverlay: 'Ctrl+Shift+Y',
+    collectionsOverlay: 'Ctrl+Shift+U'
   })
 
   useEffect(() => {
@@ -230,6 +237,7 @@ export function OverlayPage(): JSX.Element {
       .then((h) => setHkDisp(h.display))
       .catch(() => {})
   }, [])
+
   const [cheatSheetMode, setCheatSheetMode] = useState(true)
   const [detailId, setDetailId] = useState<string | null>(null)
   /** Просмотр статьи из глобального поиска (не из закрепов) — остаёмся в оверлее. */
@@ -320,6 +328,13 @@ export function OverlayPage(): JSX.Element {
   }, [refresh])
 
   useEffect(() => {
+    void window.lawHelper.tags.list().then((raw) => {
+      const rows = raw as { id: string; name: string }[]
+      setTagOptions(Array.isArray(rows) ? rows : [])
+    })
+  }, [])
+
+  useEffect(() => {
     window.lawHelper.overlay.setOpacity(opacity)
   }, [opacity])
 
@@ -333,10 +348,12 @@ export function OverlayPage(): JSX.Element {
       setGlobalHits([])
       return
     }
-    void window.lawHelper.search.query(q).then((raw) => {
-      setGlobalHits(raw as SearchHit[])
-    })
-  }, [debouncedGlobal])
+    void window.lawHelper.search
+      .query(q, tagFilterId ? { tagIds: [tagFilterId] } : undefined)
+      .then((raw) => {
+        setGlobalHits(raw as SearchHit[])
+      })
+  }, [debouncedGlobal, tagFilterId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -463,7 +480,10 @@ export function OverlayPage(): JSX.Element {
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col rounded-xl border border-white/[0.12] bg-gradient-to-b from-[#0e1219]/95 via-[#0a0d12]/92 to-[#080a0e]/95 text-app shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_24px_64px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+    <div
+      className="box-border flex h-full min-h-0 max-h-full w-full max-w-full flex-1 flex-col rounded-xl border border-white/[0.12] bg-[#0a0d12] text-app shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_24px_64px_rgba(0,0,0,0.55)]"
+      style={{ WebkitFontSmoothing: 'antialiased' } as React.CSSProperties}
+    >
       {/* Title bar */}
       <header
         className={`shrink-0 border-b border-white/[0.08] bg-black/20 px-2 ${chromeCompact ? 'py-1.5' : 'py-2'}`}
@@ -582,9 +602,24 @@ export function OverlayPage(): JSX.Element {
               </button>
             )}
           </div>
+          <div className="mt-1 flex items-center gap-2 rounded-lg border border-white/5 bg-black/25 px-2 py-1">
+            <span className="shrink-0 text-[9px] uppercase tracking-wide text-white/40">тег FTS</span>
+            <select
+              className="min-w-0 flex-1 rounded border border-white/10 bg-black/40 px-1 py-0.5 text-[10px] text-white outline-none"
+              value={tagFilterId}
+              onChange={(e) => setTagFilterId(e.target.value)}
+            >
+              <option value="">Все статьи</option>
+              {tagOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
           {globalOpen && globalHits.length > 0 && globalQ.trim().length >= 2 && (
             <ul
-              className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-auto rounded-lg border border-white/10 bg-[#0d1118] py-1 shadow-xl"
+              className={`absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-auto rounded-lg border border-white/10 bg-[#0d1118] py-1 shadow-xl ${ovScroll}`}
               onMouseDown={(e) => e.stopPropagation()}
             >
               {globalHits.slice(0, 8).map((h) => (
@@ -769,7 +804,9 @@ export function OverlayPage(): JSX.Element {
                   </>
                 )}
               </div>
-              <div className={`min-h-0 flex-1 overflow-auto pb-2 pt-2 ${readingComfort ? 'px-2.5' : 'px-2'}`}>
+              <div
+                className={`min-h-0 flex-1 overflow-auto pb-2 pt-2 ${readingComfort ? 'px-2.5' : 'px-2'} ${ovScroll}`}
+              >
                 {filteredPins.length === 0 ? (
                   <p className="p-4 text-center text-[11px] text-white/50">Нет совпадений по фильтру.</p>
                 ) : (
@@ -915,7 +952,7 @@ export function OverlayPage(): JSX.Element {
               }}
             >
               {pins.length > 1 ? (
-                <div className="mb-2 flex max-w-full gap-1 overflow-x-auto pb-1">
+                <div className={`mb-2 flex max-w-full gap-1 overflow-x-auto pb-1 ${ovScroll}`}>
                   {pins.map((p, i) => (
                     <button
                       key={p.id}
@@ -938,7 +975,7 @@ export function OverlayPage(): JSX.Element {
                 {articleDisplayTitle(current.article_number, current.heading)}
               </div>
               <MetaChips meta={parseDisplayMeta(current.display_meta_json)} />
-              <div className="mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap text-white/75">
+              <div className={`mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap text-white/75 ${ovScroll}`}>
                 {bodyDisplay}
               </div>
               {pins.length > 1 && (
@@ -991,6 +1028,9 @@ export function OverlayPage(): JSX.Element {
             )}
             {' '}
             · Esc — из деталей или скрыть окно
+            <span className="mt-1 block text-white/35">
+              Отдельные окна: {hkDisp.cheatsOverlay} — шпаргалки · {hkDisp.collectionsOverlay} — подборки
+            </span>
           </>
         )}
       </footer>
@@ -1109,7 +1149,7 @@ function ArticleDetailPane({
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div className={`min-h-0 flex-1 overflow-y-auto px-3 py-3 ${ovScroll}`}>
         {!bodyText.trim() ? (
           <p className="text-[11px] text-white/45">Нет текста.</p>
         ) : sections.length > 1 ? (

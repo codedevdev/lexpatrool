@@ -715,6 +715,14 @@ export function AiPage(): JSX.Element {
         <p className="text-sm leading-snug text-app-muted">
           Ответы из <strong className="font-medium text-app">локальной базы</strong>. Проверяйте статьи в читателе.
         </p>
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3 py-3 text-xs leading-relaxed text-amber-50/90">
+          <p className="font-semibold text-amber-100">Важно про доверие</p>
+          <ul className="mt-2 list-disc space-y-1.5 pl-4">
+            <li>ИИ может ошибаться или обобщать; не опирайтесь на ответ как на единственное доказательство в RP или OOC.</li>
+            <li>В контекст попадают только фрагменты из вашей локальной базы — если статьи не импортированы, модель их «не знает».</li>
+            <li>С включённым ключом запросы уходят выбранному провайдеру (облако или ваш Ollama). Отключите раздел, если не хотите внешних запросов.</li>
+          </ul>
+        </div>
         <AiHowItWorksGuide />
       </header>
 

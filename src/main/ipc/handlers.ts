@@ -38,6 +38,7 @@ function mergeAgentConfig(
 import { v4 as uuid } from 'uuid'
 import type {
   ImportPayload,
+  ReplaceDocumentImportPayload,
   AiProviderConfig,
   AiCompletePayload,
   AiAgentRecord,
@@ -47,13 +48,10 @@ import type {
 } from '../../shared/types'
 import { extractManualDom } from '../../parsers/manual-dom-extract'
 import { parseHtmlWithReadability } from '../../parsers/readability-import'
-import { filterArticleSplits, type ArticleImportFilter } from '../../parsers/article-import-filter'
 import { resolveArticleSplits } from '../../parsers/resolve-article-splits'
-import { attachArticleToStack, type ArticleStackEntry } from '../../parsers/article-hierarchy'
-import { isPartHeading, type SplitArticle } from '../../parsers/article-split'
-import { stripRedundantLeadingNumber } from '../../shared/article-display'
-import { enrichArticle, metaToJson } from '../../parsers/article-enrichment'
+import type { SplitArticle } from '../../parsers/article-split'
 import { logParse, logParseDump, parseTraceVerbose } from '../../parsers/parse-trace'
+import { insertArticlesFromSplits, replaceDocumentArticlesFromSplits } from '../article-splits-persist'
 import { retrieveChunksForQuery, snippetForArticleBody } from '../../services/retrieval'
 import {
   buildSystemPrompt,
@@ -62,9 +60,11 @@ import {
   type AiMessage
 } from '../../services/ai-gateway'
 import type { OverlayController } from '../overlay-window'
+import type { ToolOverlayController } from '../tool-overlay-window'
 import {
   applyOverlayGlobalShortcuts,
   DEFAULT_HOTKEYS,
+  HOTKEY_FIELDS,
   humanizeAccelerator,
   readHotkeys,
   saveHotkeys,
@@ -78,88 +78,31 @@ export interface IpcContext {
   getMainWindow: () => BrowserWindow | null
   getDb: () => Database
   overlay: OverlayController
-  openExternal: (url: string) => void
+  cheatToolOverlay: ToolOverlayController
+  collectionToolOverlay: ToolOverlayController
 }
 
 function nowIso(): string {
   return new Date().toISOString()
 }
 
-function insertArticlesFromSplits(
-  db: Database,
-  docId: string,
-  splits: SplitArticle[],
-  rawText: string,
-  articleFilter: ArticleImportFilter | undefined
-): void {
-  const filterMode = articleFilter ?? 'all'
-  const filtered = filterArticleSplits(splits, filterMode)
-  if (filterMode === 'with_sanctions' && filtered.length === 0 && splits.length > 0) {
-    logParse('insertArticlesFromSplits: with_sanctions — ни один блок не содержит маркеров санкций', {
-      blocks: splits.length
-    })
-  } else if (filtered.length !== splits.length) {
-    logParse('insertArticlesFromSplits: фильтр articleFilter', {
-      filterMode,
-      before: splits.length,
-      after: filtered.length
-    })
-  }
-  const stack: ArticleStackEntry[] = []
-
-  for (let i = 0; i < filtered.length; i++) {
-    const s = filtered[i]!
-    const heading = stripRedundantLeadingNumber(s.articleNumber, s.heading)
-    const isPart = isPartHeading(heading)
-    const num = s.articleNumber?.trim() ?? ''
-
-    let parentId: string | null = null
-    let level = 1
-
-    if (isPart) {
-      const top = stack[stack.length - 1]
-      parentId = top?.id ?? null
-      level = top ? stack.length + 1 : 1
-    } else if (num) {
-      const r = attachArticleToStack(stack, num)
-      parentId = r.parentId
-      level = r.level
-    } else {
-      stack.length = 0
-    }
-
-    const aid = uuid()
-
-    if (!isPart && num) {
-      stack.push({ id: aid, articleNumber: num })
-    }
-
-    const e = enrichArticle(heading, s.body, {
-      referenceImport: filterMode === 'without_sanctions'
-    })
-    db.prepare(
-      `INSERT INTO articles (id, document_id, article_number, heading, level, sort_order, body_clean, body_raw, path_json, summary_short, penalty_hint, display_meta_json, parent_article_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      aid,
-      docId,
-      s.articleNumber,
-      heading,
-      level,
-      i + 1,
-      s.body,
-      rawText,
-      JSON.stringify([heading]),
-      e.summaryShort,
-      e.penaltyHint,
-      metaToJson(e.meta),
-      parentId
-    )
+function ensureTagByName(db: Database, name: string): string | null {
+  const n = name.trim()
+  if (!n) return null
+  const row = db.prepare('SELECT id FROM tags WHERE LOWER(name) = LOWER(?)').get(n) as { id: string } | undefined
+  if (row) return row.id
+  const id = uuid()
+  try {
+    db.prepare('INSERT INTO tags (id, name) VALUES (?, ?)').run(id, n)
+    return id
+  } catch {
+    const again = db.prepare('SELECT id FROM tags WHERE LOWER(name) = LOWER(?)').get(n) as { id: string } | undefined
+    return again?.id ?? null
   }
 }
 
 export function registerIpcHandlers(ctx: IpcContext): void {
-  const { getDb, overlay, getMainWindow } = ctx
+  const { getDb, overlay, cheatToolOverlay, collectionToolOverlay, getMainWindow } = ctx
 
   ipcMain.handle('app:get-version', async () => {
     return app.getVersion()
@@ -171,11 +114,15 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   ipcMain.handle('db:backup', async () => {
     const win = ctx.getMainWindow()
-    const { filePath } = await dialog.showSaveDialog(win ?? undefined, {
+    const opts = {
       title: 'Сохранить резервную копию',
       defaultPath: 'lexpatrol-backup.json',
       filters: [{ name: 'JSON', extensions: ['json'] }]
-    })
+    }
+    const { filePath } =
+      win != null && !win.isDestroyed()
+        ? await dialog.showSaveDialog(win, opts)
+        : await dialog.showSaveDialog(opts)
     if (!filePath) return { ok: false }
     const db = getDb()
     const tables = [
@@ -187,6 +134,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       'clauses',
       'tags',
       'document_tags',
+      'article_tag_assignments',
       'bookmarks',
       'notes',
       'retrieval_chunks',
@@ -195,14 +143,25 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       'app_settings',
       'overlay_pins',
       'import_jobs',
-      'ai_agents'
+      'ai_agents',
+      'article_collections',
+      'article_collection_items',
+      'article_see_also',
+      'cheat_sheets',
+      'reader_recents'
     ] as const
     const dump: Record<string, unknown[]> = {}
     for (const t of tables) {
       dump[t] = db.prepare(`SELECT * FROM ${t}`).all()
     }
-    writeFileSync(filePath, JSON.stringify({ version: 1, exportedAt: nowIso(), data: dump }, null, 2), 'utf-8')
-    return { ok: true, path: filePath }
+    try {
+      writeFileSync(filePath, JSON.stringify({ version: 1, exportedAt: nowIso(), data: dump }, null, 2), 'utf-8')
+      return { ok: true, path: filePath }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      console.error('[LexPatrol] db:backup', e)
+      return { ok: false, error: message }
+    }
   })
 
   ipcMain.handle('settings:get', (_e, key: string) => {
@@ -357,6 +316,10 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       sets.push('display_meta_json = ?')
       vals.push(payload.display_meta_json)
     }
+    if (payload.clearPreviousRevision) {
+      sets.push('previous_body_clean = NULL')
+      sets.push('previous_captured_at = NULL')
+    }
     if (sets.length === 0) return { ok: true as const }
 
     vals.push(payload.id)
@@ -375,9 +338,14 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return { ok: true as const }
   })
 
-  ipcMain.handle('search:query', (_e, q: string) => {
+  ipcMain.handle('search:query', (_e, q: string, opts?: { tagIds?: string[] }) => {
     const db = getDb()
-    return retrieveChunksForQuery(db, q, 25).map((c, i) => ({
+    const tagIds =
+      opts && Array.isArray(opts.tagIds)
+        ? opts.tagIds.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        : undefined
+    const chunks = retrieveChunksForQuery(db, q, 25, tagIds?.length ? { tagIds } : undefined)
+    return chunks.map((c, i) => ({
       article_id: c.articleId,
       document_id: c.documentId,
       document_title: c.documentTitle,
@@ -451,6 +419,62 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     insertArticlesFromSplits(db, docId, splits, rawText, payload.articleFilter)
 
     return { sourceId, documentId: docId }
+  })
+
+  ipcMain.handle('import:replace-document', (_e, payload: ReplaceDocumentImportPayload) => {
+    const db = getDb()
+    const docId = payload.documentId?.trim()
+    if (!docId) return { ok: false as const, error: 'no_document' as const }
+    const doc = db.prepare('SELECT id, source_id FROM documents WHERE id = ?').get(docId) as
+      | { id: string; source_id: string | null }
+      | undefined
+    if (!doc) return { ok: false as const, error: 'document_not_found' as const }
+    if (!doc.source_id) return { ok: false as const, error: 'no_source' as const }
+
+    let rawHtml = payload.rawHtml ?? null
+    let rawText = payload.rawText ?? ''
+    let title = payload.title?.trim() || 'Импорт'
+
+    if (rawHtml) {
+      const r = parseHtmlWithReadability(rawHtml, payload.url)
+      title = r.title || title
+      rawText = r.text || rawText
+    }
+
+    logParse('import:replace-document', {
+      documentId: docId,
+      rawTextLength: rawText.length,
+      title: title.slice(0, 100)
+    })
+
+    const t = nowIso()
+    const articleFilter = payload.articleFilter ?? null
+
+    db.prepare(
+      `UPDATE sources SET title = ?, url = ?, source_type = ?, tags_json = ?, category_id = ?, code_family = ?,
+         raw_html = ?, raw_text = ?, refreshed_at = ?
+       WHERE id = ?`
+    ).run(
+      title,
+      payload.url ?? null,
+      payload.sourceType,
+      JSON.stringify(payload.tags ?? []),
+      payload.categoryId ?? null,
+      payload.codeFamily ?? null,
+      rawHtml,
+      rawText,
+      t,
+      doc.source_id
+    )
+
+    db.prepare(
+      `UPDATE documents SET title = ?, slug = ?, updated_at = ?, raw_html = ?, raw_text = ?, category_id = ?, article_import_filter = ?
+       WHERE id = ?`
+    ).run(title, slugify(title), t, rawHtml, rawText, payload.categoryId ?? null, articleFilter, docId)
+
+    const splits = resolveArticleSplits(rawText, title, payload.splitArticles !== false)
+    const stats = replaceDocumentArticlesFromSplits(db, docId, splits, rawText, payload.articleFilter)
+    return { ok: true as const, documentId: docId, stats }
   })
 
   ipcMain.handle('overlay:pin-article', (_e, articleId: unknown) => {
@@ -647,6 +671,29 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     overlay.dock(where)
   })
 
+  const pickToolOverlay = (which: unknown): ToolOverlayController | null => {
+    if (which === 'cheats') return cheatToolOverlay
+    if (which === 'collections') return collectionToolOverlay
+    return null
+  }
+
+  ipcMain.handle('toolOverlay:show', (_e, which: unknown) => {
+    pickToolOverlay(which)?.show()
+  })
+  ipcMain.handle('toolOverlay:hide', (_e, which: unknown) => {
+    pickToolOverlay(which)?.hide()
+  })
+  ipcMain.handle('toolOverlay:toggle', (_e, which: unknown) => {
+    pickToolOverlay(which)?.toggle()
+  })
+  ipcMain.handle('toolOverlay:raise', (_e, which: unknown) => {
+    pickToolOverlay(which)?.bringToFront()
+    return true
+  })
+  ipcMain.handle('toolOverlay:dock', (_e, which: unknown, where: 'left' | 'right' | 'top-right' | 'center') => {
+    pickToolOverlay(which)?.dock(where)
+  })
+
   ipcMain.handle('overlay:reorder-pins', (_e, orderedArticleIds: string[]) => {
     const db = getDb()
     const ids = Array.isArray(orderedArticleIds) ? orderedArticleIds : []
@@ -754,6 +801,38 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       ...(mode === 'manual' && payload.manualRules ? { manualRules: payload.manualRules } : {})
     }
 
+    const articleFilter = payload.articleFilter ?? null
+    const replaceId =
+      typeof payload.replaceDocumentId === 'string' ? payload.replaceDocumentId.trim() : ''
+
+    if (replaceId) {
+      const doc = db
+        .prepare('SELECT id, source_id FROM documents WHERE id = ?')
+        .get(replaceId) as { id: string; source_id: string | null } | undefined
+      if (!doc) return { ok: false as const, error: 'document_not_found' as const }
+      if (!doc.source_id) return { ok: false as const, error: 'no_source' as const }
+
+      logParse('browser:import-current: обновление документа', {
+        documentId: replaceId,
+        rawTextLength: rawText.length,
+        title: title.slice(0, 100)
+      })
+
+      db.prepare(
+        `UPDATE sources SET title = ?, url = ?, source_type = 'web_page', raw_html = ?, raw_text = ?, refreshed_at = ?, metadata_json = ?
+         WHERE id = ?`
+      ).run(title, payload.url ?? null, payload.html, rawText, t, JSON.stringify(meta), doc.source_id)
+
+      db.prepare(
+        `UPDATE documents SET title = ?, slug = ?, updated_at = ?, raw_html = ?, raw_text = ?, article_import_filter = ?
+         WHERE id = ?`
+      ).run(title, slugify(title), t, payload.html, rawText, articleFilter, replaceId)
+
+      replaceDocumentArticlesFromSplits(db, replaceId, splits, rawText, articleFilter ?? undefined)
+
+      return { ok: true as const, sourceId: doc.source_id, documentId: replaceId }
+    }
+
     const sourceId = uuid()
     db.prepare(
       `INSERT INTO sources (id, title, url, source_type, imported_at, tags_json, metadata_json, raw_html, raw_text)
@@ -761,27 +840,38 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     ).run(sourceId, title, payload.url, t, JSON.stringify(meta), payload.html, rawText)
 
     const docId = uuid()
-    const articleFilter = payload.articleFilter ?? null
     db.prepare(
       `INSERT INTO documents (id, source_id, title, slug, created_at, updated_at, raw_html, raw_text, article_import_filter)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(docId, sourceId, title, slugify(title), t, t, payload.html, rawText, articleFilter)
 
-    insertArticlesFromSplits(db, docId, splits, rawText, payload.articleFilter)
+    insertArticlesFromSplits(db, docId, splits, rawText, articleFilter ?? undefined)
 
-    return { sourceId, documentId: docId }
+    return { ok: true as const, sourceId, documentId: docId }
   })
 
   ipcMain.handle('hotkeys:get', () => {
     const h = readHotkeys(getDb())
+    const d = DEFAULT_HOTKEYS
     return {
       toggle: h.toggle,
       search: h.search,
       clickThrough: h.clickThrough,
+      cheatsOverlay: h.cheatsOverlay,
+      collectionsOverlay: h.collectionsOverlay,
       display: {
         toggle: humanizeAccelerator(h.toggle),
         search: humanizeAccelerator(h.search),
-        clickThrough: humanizeAccelerator(h.clickThrough)
+        clickThrough: humanizeAccelerator(h.clickThrough),
+        cheatsOverlay: humanizeAccelerator(h.cheatsOverlay),
+        collectionsOverlay: humanizeAccelerator(h.collectionsOverlay)
+      },
+      defaultsDisplay: {
+        toggle: humanizeAccelerator(d.toggle),
+        search: humanizeAccelerator(d.search),
+        clickThrough: humanizeAccelerator(d.clickThrough),
+        cheatsOverlay: humanizeAccelerator(d.cheatsOverlay),
+        collectionsOverlay: humanizeAccelerator(d.collectionsOverlay)
       }
     }
   })
@@ -792,17 +882,23 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     const merged: HotkeyConfig = {
       toggle: typeof partial.toggle === 'string' ? partial.toggle.trim() : cur.toggle,
       search: typeof partial.search === 'string' ? partial.search.trim() : cur.search,
-      clickThrough: typeof partial.clickThrough === 'string' ? partial.clickThrough.trim() : cur.clickThrough
+      clickThrough: typeof partial.clickThrough === 'string' ? partial.clickThrough.trim() : cur.clickThrough,
+      cheatsOverlay:
+        typeof partial.cheatsOverlay === 'string' ? partial.cheatsOverlay.trim() : cur.cheatsOverlay,
+      collectionsOverlay:
+        typeof partial.collectionsOverlay === 'string'
+          ? partial.collectionsOverlay.trim()
+          : cur.collectionsOverlay
     }
-    const vals = [merged.toggle, merged.search, merged.clickThrough]
+    const vals = HOTKEY_FIELDS.map((k) => merged[k])
     if (new Set(vals).size !== vals.length) {
       return { ok: false as const, error: 'duplicate' as const }
     }
     globalShortcut.unregisterAll()
-    for (const label of ['toggle', 'search', 'clickThrough'] as const) {
+    for (const label of HOTKEY_FIELDS) {
       const r = validateAccelerator(merged[label])
       if (!r.ok) {
-        applyOverlayGlobalShortcuts(overlay, db)
+        applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, db)
         return { ok: false as const, error: 'invalid' as const, field: label, detail: r.error }
       }
     }
@@ -813,15 +909,14 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       console.error('[LexPatrol] hotkeys:set saveHotkeys', e)
       throw e
     } finally {
-      /** После validate все сочетания сняты; всегда восстанавливаем из БД (или дефолты), иначе горячие клавиши «молчат». */
-      applyOverlayGlobalShortcuts(overlay, db)
+      applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, db)
     }
   })
 
   ipcMain.handle('hotkeys:reset-defaults', () => {
     const db = getDb()
     saveHotkeys(db, DEFAULT_HOTKEYS)
-    applyOverlayGlobalShortcuts(overlay, db)
+    applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, db)
     return { ok: true as const }
   })
 
@@ -862,6 +957,264 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     if (typeof articleId !== 'string' || !articleId.trim()) return { ok: false as const }
     const r = getDb().prepare('DELETE FROM bookmarks WHERE article_id = ?').run(articleId.trim())
     return { ok: r.changes > 0 }
+  })
+
+  ipcMain.handle('collections:list', () => {
+    return getDb()
+      .prepare(
+        `SELECT c.*,
+          (SELECT COUNT(*) FROM article_collection_items i WHERE i.collection_id = c.id) AS article_count
+         FROM article_collections c
+         ORDER BY c.sort_order ASC, c.name ASC`
+      )
+      .all()
+  })
+
+  ipcMain.handle(
+    'collections:save',
+    (_e, row: { id?: string; name: string; description?: string | null; sort_order?: number }) => {
+      const db = getDb()
+      const name = row.name?.trim()
+      if (!name) return { ok: false as const, error: 'name' as const }
+      const t = nowIso()
+      const id = row.id?.trim() || uuid()
+      const existing = db.prepare('SELECT id FROM article_collections WHERE id = ?').get(id) as { id: string } | undefined
+      const sort =
+        row.sort_order ??
+        ((db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM article_collections').get() as { m: number }).m +
+          1)
+      if (existing) {
+        db.prepare(
+          `UPDATE article_collections SET name = ?, description = ?, sort_order = ? WHERE id = ?`
+        ).run(name, row.description?.trim() || null, sort, id)
+      } else {
+        db.prepare(
+          `INSERT INTO article_collections (id, name, description, sort_order, created_at) VALUES (?, ?, ?, ?, ?)`
+        ).run(id, name, row.description?.trim() || null, sort, t)
+      }
+      return { ok: true as const, id }
+    }
+  )
+
+  ipcMain.handle('collections:delete', (_e, id: string) => {
+    if (!id?.trim()) return false
+    getDb().prepare('DELETE FROM article_collections WHERE id = ?').run(id.trim())
+    return true
+  })
+
+  ipcMain.handle('collections:getArticles', (_e, collectionId: string) => {
+    if (!collectionId?.trim()) return []
+    return getDb()
+      .prepare(
+        `SELECT a.id, a.heading, a.article_number, a.body_clean, a.summary_short, a.penalty_hint, a.display_meta_json,
+                d.id AS document_id, d.title AS document_title, d.article_import_filter AS document_article_import_filter,
+                i.sort_order
+         FROM article_collection_items i
+         JOIN articles a ON a.id = i.article_id
+         JOIN documents d ON d.id = a.document_id
+         WHERE i.collection_id = ?
+         ORDER BY i.sort_order ASC`
+      )
+      .all(collectionId.trim())
+  })
+
+  ipcMain.handle('collections:addArticle', (_e, collectionId: string, articleId: string) => {
+    const db = getDb()
+    const cid = collectionId?.trim()
+    const aid = articleId?.trim()
+    if (!cid || !aid) return { ok: false as const, error: 'ids' as const }
+    const a = db.prepare('SELECT id FROM articles WHERE id = ?').get(aid) as { id: string } | undefined
+    if (!a) return { ok: false as const, error: 'article' as const }
+    const c = db.prepare('SELECT id FROM article_collections WHERE id = ?').get(cid) as { id: string } | undefined
+    if (!c) return { ok: false as const, error: 'collection' as const }
+    const ex = db
+      .prepare('SELECT 1 FROM article_collection_items WHERE collection_id = ? AND article_id = ?')
+      .get(cid, aid) as { 1: number } | undefined
+    if (ex) return { ok: true as const }
+    const max = db
+      .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM article_collection_items WHERE collection_id = ?')
+      .get(cid) as { m: number }
+    db.prepare(
+      `INSERT INTO article_collection_items (collection_id, article_id, sort_order) VALUES (?, ?, ?)`
+    ).run(cid, aid, max.m + 1)
+    return { ok: true as const }
+  })
+
+  ipcMain.handle('collections:removeArticle', (_e, collectionId: string, articleId: string) => {
+    const db = getDb()
+    const r = db
+      .prepare('DELETE FROM article_collection_items WHERE collection_id = ? AND article_id = ?')
+      .run(collectionId?.trim(), articleId?.trim())
+    return { ok: r.changes > 0 }
+  })
+
+  ipcMain.handle('collections:reorderArticles', (_e, collectionId: string, orderedArticleIds: string[]) => {
+    const db = getDb()
+    const cid = collectionId?.trim()
+    if (!cid) return false
+    const ids = Array.isArray(orderedArticleIds) ? orderedArticleIds : []
+    const tx = db.transaction(() => {
+      ids.forEach((articleId, i) => {
+        db.prepare(
+          `UPDATE article_collection_items SET sort_order = ? WHERE collection_id = ? AND article_id = ?`
+        ).run(i + 1, cid, articleId)
+      })
+    })
+    tx()
+    return true
+  })
+
+  ipcMain.handle('tags:list', () => {
+    return getDb().prepare('SELECT * FROM tags ORDER BY name ASC').all()
+  })
+
+  ipcMain.handle('articleTags:get', (_e, articleId: string) => {
+    if (!articleId?.trim()) return []
+    return getDb()
+      .prepare(
+        `SELECT t.id, t.name FROM tags t
+         JOIN article_tag_assignments x ON x.tag_id = t.id
+         WHERE x.article_id = ?
+         ORDER BY t.name ASC`
+      )
+      .all(articleId.trim())
+  })
+
+  ipcMain.handle('articleTags:set', (_e, articleId: string, tagNames: string[]) => {
+    const db = getDb()
+    const aid = articleId?.trim()
+    if (!aid) return { ok: false as const }
+    const a = db.prepare('SELECT id FROM articles WHERE id = ?').get(aid) as { id: string } | undefined
+    if (!a) return { ok: false as const, error: 'article' as const }
+    const names = Array.isArray(tagNames) ? tagNames : []
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM article_tag_assignments WHERE article_id = ?').run(aid)
+      for (const raw of names) {
+        const tid = ensureTagByName(db, String(raw))
+        if (!tid) continue
+        db.prepare('INSERT OR IGNORE INTO article_tag_assignments (article_id, tag_id) VALUES (?, ?)').run(aid, tid)
+      }
+    })
+    tx()
+    return { ok: true as const }
+  })
+
+  ipcMain.handle('seeAlso:list', (_e, fromArticleId: string) => {
+    if (!fromArticleId?.trim()) return []
+    return getDb()
+      .prepare(
+        `SELECT s.id, s.to_article_id AS article_id, s.sort_order,
+                a.heading, a.article_number, d.title AS document_title, d.id AS document_id
+         FROM article_see_also s
+         JOIN articles a ON a.id = s.to_article_id
+         JOIN documents d ON d.id = a.document_id
+         WHERE s.from_article_id = ?
+         ORDER BY s.sort_order ASC, a.sort_order ASC`
+      )
+      .all(fromArticleId.trim())
+  })
+
+  ipcMain.handle('seeAlso:add', (_e, fromArticleId: string, toArticleId: string) => {
+    const db = getDb()
+    const from = fromArticleId?.trim()
+    const to = toArticleId?.trim()
+    if (!from || !to || from === to) return { ok: false as const, error: 'ids' as const }
+    const fromRow = db.prepare('SELECT id FROM articles WHERE id = ?').get(from) as { id: string } | undefined
+    const toRow = db.prepare('SELECT id FROM articles WHERE id = ?').get(to) as { id: string } | undefined
+    if (!fromRow || !toRow) return { ok: false as const, error: 'missing' as const }
+    const ex = db
+      .prepare('SELECT id FROM article_see_also WHERE from_article_id = ? AND to_article_id = ?')
+      .get(from, to) as { id: string } | undefined
+    if (ex) return { ok: true as const, id: ex.id }
+    const max = db
+      .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM article_see_also WHERE from_article_id = ?')
+      .get(from) as { m: number }
+    const id = uuid()
+    db.prepare(
+      `INSERT INTO article_see_also (id, from_article_id, to_article_id, sort_order) VALUES (?, ?, ?, ?)`
+    ).run(id, from, to, max.m + 1)
+    return { ok: true as const, id }
+  })
+
+  ipcMain.handle('seeAlso:remove', (_e, linkId: string) => {
+    if (!linkId?.trim()) return false
+    const r = getDb().prepare('DELETE FROM article_see_also WHERE id = ?').run(linkId.trim())
+    return r.changes > 0
+  })
+
+  ipcMain.handle('reader:pushRecent', (_e, articleId: string) => {
+    const aid = articleId?.trim()
+    if (!aid) return false
+    const db = getDb()
+    const a = db.prepare('SELECT id FROM articles WHERE id = ?').get(aid) as { id: string } | undefined
+    if (!a) return false
+    const t = nowIso()
+    db.prepare(
+      `INSERT INTO reader_recents (article_id, opened_at) VALUES (?, ?)
+       ON CONFLICT(article_id) DO UPDATE SET opened_at = excluded.opened_at`
+    ).run(aid, t)
+    return true
+  })
+
+  ipcMain.handle('reader:listRecent', (_e, limit = 20) => {
+    const lim = typeof limit === 'number' && limit > 0 ? Math.min(50, limit) : 20
+    return getDb()
+      .prepare(
+        `SELECT r.opened_at, a.id, a.heading, a.article_number, d.id AS document_id, d.title AS document_title
+         FROM reader_recents r
+         JOIN articles a ON a.id = r.article_id
+         JOIN documents d ON d.id = a.document_id
+         ORDER BY r.opened_at DESC
+         LIMIT ?`
+      )
+      .all(lim)
+  })
+
+  ipcMain.handle('cheatSheets:list', () => {
+    return getDb()
+      .prepare('SELECT id, title, body, sort_order, created_at, updated_at FROM cheat_sheets ORDER BY sort_order ASC, title ASC')
+      .all()
+  })
+
+  ipcMain.handle('cheatSheets:get', (_e, id: string) => {
+    if (!id?.trim()) return null
+    return getDb().prepare('SELECT * FROM cheat_sheets WHERE id = ?').get(id.trim())
+  })
+
+  ipcMain.handle(
+    'cheatSheets:save',
+    (_e, row: { id?: string; title: string; body: string; sort_order?: number }) => {
+      const db = getDb()
+      const title = row.title?.trim()
+      const body = typeof row.body === 'string' ? row.body : ''
+      if (!title) return { ok: false as const, error: 'title' as const }
+      const t = nowIso()
+      const id = row.id?.trim() || uuid()
+      const existing = db.prepare('SELECT id FROM cheat_sheets WHERE id = ?').get(id) as { id: string } | undefined
+      const sort =
+        row.sort_order ??
+        ((db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM cheat_sheets').get() as { m: number }).m + 1)
+      if (existing) {
+        db.prepare(`UPDATE cheat_sheets SET title = ?, body = ?, sort_order = ?, updated_at = ? WHERE id = ?`).run(
+          title,
+          body,
+          sort,
+          t,
+          id
+        )
+      } else {
+        db.prepare(
+          `INSERT INTO cheat_sheets (id, title, body, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(id, title, body, sort, t, t)
+      }
+      return { ok: true as const, id }
+    }
+  )
+
+  ipcMain.handle('cheatSheets:delete', (_e, id: string) => {
+    if (!id?.trim()) return false
+    const r = getDb().prepare('DELETE FROM cheat_sheets WHERE id = ?').run(id.trim())
+    return r.changes > 0
   })
 
   ipcMain.handle('notes:list', () => {

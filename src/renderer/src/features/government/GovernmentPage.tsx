@@ -213,9 +213,14 @@ export function GovernmentPage(): JSX.Element {
             <p className="mt-1.5 text-[11px] leading-snug text-app-muted">
               Ниже — кнопки с запросами под типичные ситуации; запросы можно подстроить под ваш форум.
             </p>
-            <Link className="mt-3 inline-block text-[11px] font-medium text-accent hover:underline" to="/kb">
-              База знаний →
-            </Link>
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+              <Link className="font-medium text-accent hover:underline" to="/kb">
+                База знаний →
+              </Link>
+              <Link className="font-medium text-accent hover:underline" to="/collections">
+                Подборки на смену →
+              </Link>
+            </div>
           </li>
           <li className="rounded-xl border border-white/[0.06] bg-black/25 px-4 py-4">
             <span className="font-mono text-[10px] text-accent/90">03</span>

@@ -481,7 +481,7 @@ export function splitIntoArticles(raw: string): SplitArticle[] {
       isClosingParenEnumLine(trimmed)
 
     if (statyaEnumContinuation) {
-      current.body += `${trimmed}\n`
+      if (current) current.body += `${trimmed}\n`
       prevNonEmpty = trimmed
       continue
     }

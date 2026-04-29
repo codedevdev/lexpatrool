@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { ArticleDisplayMeta } from '@parsers/article-enrichment'
 import { articleDisplayTitle } from '@shared/article-display'
 import { RouteEmptyState } from '../../components/RouteEmptyState'
@@ -162,12 +162,56 @@ export function ReaderPage(): JSX.Element {
 
   const [articleBookmarked, setArticleBookmarked] = useState(false)
 
+  const [revInfo, setRevInfo] = useState<{ body: string; at: string } | null>(null)
+  const [diffOpen, setDiffOpen] = useState(false)
+  const [tagDraft, setTagDraft] = useState('')
+  const [seeRows, setSeeRows] = useState<
+    { id: string; article_id: string; heading: string; document_id: string; document_title: string }[]
+  >([])
+  const [seeAddId, setSeeAddId] = useState('')
+  const [collections, setCollections] = useState<{ id: string; name: string }[]>([])
+  const [collectionPick, setCollectionPick] = useState('')
+
+  useEffect(() => {
+    void window.lawHelper.collections.list().then((raw) => {
+      const list = raw as { id: string; name: string }[]
+      setCollections(Array.isArray(list) ? list : [])
+    })
+  }, [])
+
   useEffect(() => {
     if (!active?.id) {
       setArticleBookmarked(false)
       return
     }
     void window.lawHelper.bookmarks.has(active.id).then(setArticleBookmarked)
+  }, [active?.id])
+
+  useEffect(() => {
+    if (!active?.id) {
+      setRevInfo(null)
+      setTagDraft('')
+      setSeeRows([])
+      return
+    }
+    void window.lawHelper.reader.pushRecent(active.id)
+    void window.lawHelper.article.get(active.id).then((row) => {
+      const r = row as Record<string, unknown>
+      const pb = r['previous_body_clean']
+      if (typeof pb === 'string' && pb.trim()) {
+        setRevInfo({
+          body: pb,
+          at: typeof r['previous_captured_at'] === 'string' ? r['previous_captured_at'] : ''
+        })
+      } else setRevInfo(null)
+    })
+    void window.lawHelper.articleTags.get(active.id).then((raw) => {
+      const tags = raw as { name: string }[]
+      setTagDraft(Array.isArray(tags) ? tags.map((t) => t.name).join(', ') : '')
+    })
+    void window.lawHelper.seeAlso.list(active.id).then((raw) => {
+      setSeeRows(Array.isArray(raw) ? (raw as typeof seeRows) : [])
+    })
   }, [active?.id])
 
   async function toggleBookmark(): Promise<void> {
@@ -393,6 +437,43 @@ export function ReaderPage(): JSX.Element {
     void reloadAfterMutation()
   }
 
+  async function saveArticleTags(): Promise<void> {
+    if (!active) return
+    const names = tagDraft
+      .split(/[,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const r = await window.lawHelper.articleTags.set(active.id, names)
+    if (!r.ok) alert('Не удалось сохранить теги.')
+  }
+
+  async function addSeeAlsoLink(): Promise<void> {
+    if (!active) return
+    const id = seeAddId.trim()
+    if (!id) return
+    const r = await window.lawHelper.seeAlso.add(active.id, id)
+    if (!r.ok) alert('Не удалось добавить связь. Проверьте UUID целевой статьи.')
+    else {
+      setSeeAddId('')
+      void window.lawHelper.seeAlso.list(active.id).then((raw) => {
+        setSeeRows(Array.isArray(raw) ? (raw as typeof seeRows) : [])
+      })
+    }
+  }
+
+  async function addToCollection(): Promise<void> {
+    if (!active || !collectionPick) return
+    const r = await window.lawHelper.collections.addArticle(collectionPick, active.id)
+    if (!r.ok) alert('Не удалось добавить в подборку.')
+  }
+
+  async function clearRevision(): Promise<void> {
+    if (!active) return
+    await window.lawHelper.article.update({ id: active.id, clearPreviousRevision: true })
+    setRevInfo(null)
+    setDiffOpen(false)
+  }
+
   async function deleteArticle(): Promise<void> {
     if (!active || !documentId) return
     if (!confirm('Удалить эту статью из базы? Действие необратимо.')) return
@@ -559,6 +640,63 @@ export function ReaderPage(): JSX.Element {
           </div>
         )}
 
+        {revInfo && active && !articleEdit ? (
+          <div className="mb-4 rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-100/95">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                Сохранён текст до обновления импорта
+                {revInfo.at ? ` · ${new Date(revInfo.at).toLocaleString()}` : ''}.
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/15"
+                  onClick={() => setDiffOpen(true)}
+                >
+                  Сравнить
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/10 px-2 py-1 text-xs text-app-muted hover:bg-white/5"
+                  onClick={() => void clearRevision()}
+                >
+                  Убрать память
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {diffOpen && revInfo ? (
+          <div
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setDiffOpen(false)
+            }}
+          >
+            <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10 bg-[#0c1016] shadow-2xl">
+              <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                <span className="text-sm font-medium text-white">Было → сейчас</span>
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-xs text-app-muted hover:bg-white/10"
+                  onClick={() => setDiffOpen(false)}
+                >
+                  Закрыть
+                </button>
+              </div>
+              <div className="grid max-h-[calc(90vh-3.5rem)] grid-cols-1 gap-0 overflow-y-auto md:grid-cols-2">
+                <pre className="border-b border-white/10 p-4 text-xs text-app-muted md:border-b-0 md:border-r">
+                  {revInfo.body}
+                </pre>
+                <pre className="p-4 text-xs text-white/90">{active?.body_clean ?? ''}</pre>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* Заголовок на всю ширину колонки; кнопки — отдельной строкой (иначе при flex-row заголовок сжимается до узкой полоски и рвёт слова). */}
         <div className="flex flex-col gap-4">
           <div className="w-full min-w-0">
@@ -668,10 +806,122 @@ export function ReaderPage(): JSX.Element {
                 >
                   {articleBookmarked ? 'В закладках' : 'В закладки'}
                 </button>
+                {documentId ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      className="rounded-lg border border-white/15 px-3 py-2 text-sm text-app-muted hover:bg-white/5"
+                      to={`/import?replace=${encodeURIComponent(documentId)}`}
+                      title="Вставить текст или HTML из буфера / файла"
+                    >
+                      Обновить (вставка)
+                    </Link>
+                    <Link
+                      className="rounded-lg border border-accent/35 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/20"
+                      to={`/browser?replace=${encodeURIComponent(documentId)}`}
+                      title="Загрузить страницу во встроенном браузере с входом на сайт"
+                    >
+                      Обновить в браузере
+                    </Link>
+                  </div>
+                ) : null}
+                {collections.length > 0 ? (
+                  <>
+                    <select
+                      className="max-w-[10rem] rounded-lg border border-white/10 bg-surface-raised px-2 py-2 text-xs text-white outline-none focus:border-accent"
+                      value={collectionPick}
+                      disabled={articleEdit}
+                      onChange={(e) => setCollectionPick(e.target.value)}
+                    >
+                      <option value="">В подборку…</option>
+                      {collections.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={articleEdit || !collectionPick}
+                      onClick={() => void addToCollection()}
+                      className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white hover:bg-white/10 disabled:opacity-40"
+                    >
+                      +
+                    </button>
+                  </>
+                ) : null}
               </>
             )}
           </div>
         </div>
+
+        {active && !articleEdit ? (
+          <div className="mt-4 space-y-4 rounded-xl border border-white/[0.06] bg-black/20 p-4 text-sm">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-app-muted">Теги статьи</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <input
+                  className="min-w-[12rem] flex-1 rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-sm text-white outline-none focus:border-accent"
+                  placeholder="через запятую: ДТП, обыск"
+                  value={tagDraft}
+                  onChange={(e) => setTagDraft(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveArticleTags()}
+                  className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/15"
+                >
+                  Сохранить теги
+                </button>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-app-muted">См. также</div>
+              <ul className="mt-2 space-y-1">
+                {seeRows.length === 0 ? (
+                  <li className="text-xs text-app-muted">Пока нет ссылок.</li>
+                ) : (
+                  seeRows.map((s) => (
+                    <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <Link className="text-accent hover:underline" to={`/reader/${s.document_id}/${s.article_id}`}>
+                        {s.document_title} — {s.heading}
+                      </Link>
+                      <button
+                        type="button"
+                        className="text-red-300/80 hover:underline"
+                        onClick={() => {
+                          void window.lawHelper.seeAlso.remove(s.id).then(() => {
+                            if (active) {
+                              void window.lawHelper.seeAlso.list(active.id).then((raw) => {
+                                setSeeRows(Array.isArray(raw) ? (raw as typeof seeRows) : [])
+                              })
+                            }
+                          })
+                        }}
+                      >
+                        убрать
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <input
+                  className="min-w-[10rem] flex-1 rounded-lg border border-white/10 bg-surface-raised px-2 py-1.5 font-mono text-[11px] text-white outline-none focus:border-accent"
+                  placeholder="UUID статьи для связи"
+                  value={seeAddId}
+                  onChange={(e) => setSeeAddId(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => void addSeeAlsoLink()}
+                  className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+                >
+                  Добавить
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {active && articleEdit && (
           <div className="mt-6 space-y-3 rounded-xl border border-white/10 bg-black/20 p-4">

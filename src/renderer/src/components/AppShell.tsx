@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { CommandPalette } from './CommandPalette'
 import brandLogo from '../assets/brand-logo.png'
 
 const nav = [
@@ -9,6 +10,8 @@ const nav = [
   { to: '/import', label: 'Импорт' },
   { to: '/browser', label: 'Браузер' },
   { to: '/kb', label: 'База' },
+  { to: '/collections', label: 'Подборки' },
+  { to: '/cheats', label: 'Шпаргалки' },
   { to: '/ai', label: 'ИИ' },
   { to: '/notes', label: 'Заметки' },
   { to: '/settings', label: 'Настройки' }
@@ -61,9 +64,9 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   }
 
   return (
-    <div className="min-h-screen bg-canvas text-app selection:bg-accent/25 selection:text-white">
-      <div className="flex h-screen">
-        <aside className="relative w-56 shrink-0 border-r border-white/[0.06] bg-[#0c0e14]/95 backdrop-blur-xl before:pointer-events-none before:absolute before:inset-y-0 before:right-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-accent/20 before:to-transparent">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-canvas text-app selection:bg-accent/25 selection:text-white">
+      <div className="flex min-h-0 flex-1">
+        <aside className="relative flex h-full min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r border-white/[0.06] bg-[#0c0e14]/95 backdrop-blur-xl lex-app-scroll before:pointer-events-none before:absolute before:inset-y-0 before:right-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-accent/20 before:to-transparent">
           <div className="px-4 py-5">
             <img
               src={brandLogo}
@@ -97,13 +100,27 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               </NavLink>
             ))}
           </nav>
-          <div className="px-4 pb-6 mt-auto">
+          <div className="mt-auto flex flex-col gap-2 px-4 pb-6">
             <button
               type="button"
               onClick={() => void window.lawHelper.overlay.show()}
               className="w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-sm text-white hover:bg-surface-hover"
             >
               Показать оверлей
+            </button>
+            <button
+              type="button"
+              onClick={() => void window.lawHelper.toolOverlay.toggle('cheats')}
+              className="w-full rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-xs font-medium text-accent hover:bg-accent/20"
+            >
+              Окно шпаргалок
+            </button>
+            <button
+              type="button"
+              onClick={() => void window.lawHelper.toolOverlay.toggle('collections')}
+              className="w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-xs text-white/90 hover:bg-surface-hover"
+            >
+              Окно подборок
             </button>
           </div>
         </aside>
@@ -127,7 +144,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                     установке программы.
                   </span>
                   {banner.releaseNotes ? (
-                    <p className="mt-2 max-h-[4.5rem] overflow-y-auto whitespace-pre-wrap rounded-md border border-emerald-500/20 bg-black/20 px-2 py-1.5 text-[11px] leading-relaxed text-emerald-50/90">
+                    <p className="mt-2 max-h-[4.5rem] overflow-y-auto whitespace-pre-wrap rounded-md border border-emerald-500/20 bg-black/20 px-2 py-1.5 text-[11px] leading-relaxed text-emerald-50/90 lex-app-scroll">
                       {banner.releaseNotes}
                     </p>
                   ) : null}
@@ -158,11 +175,12 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               </div>
             </div>
           ) : null}
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto lex-app-scroll">
             <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-8">{children}</div>
           </div>
         </main>
       </div>
+      <CommandPalette />
     </div>
   )
 }

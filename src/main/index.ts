@@ -3,11 +3,13 @@ import { join } from 'path'
 import { initDatabase, closeDatabase, getDb } from './database'
 import { registerIpcHandlers } from './ipc/handlers'
 import { OverlayController } from './overlay-window'
+import { ToolOverlayController } from './tool-overlay-window'
 import { setMainWindowAlwaysOnTop } from './window-always-on-top'
 import { resolveAppIconPath, resolveSplashHtmlPath } from './app-resources'
 import { applyOverlayGlobalShortcuts } from './global-shortcuts'
 import { destroyTray, isAppQuitting, setupSystemTray } from './system-tray'
 import { scheduleStartupUpdateCheck } from './update-check'
+import { isSafeExternalHttpUrl } from './safe-external-url'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
@@ -76,7 +78,9 @@ if (process.platform === 'win32' && process.env['LEX_NO_DISABLE_GPU'] !== '1') {
 }
 
 let mainWindow: BrowserWindow | null = null
-let overlay: OverlayController | null = null
+let overlay!: OverlayController
+let cheatToolOverlay!: ToolOverlayController
+let collectionToolOverlay!: ToolOverlayController
 
 function createSplashWindow(): BrowserWindow | null {
   const htmlPath = resolveSplashHtmlPath()
@@ -195,70 +199,93 @@ function closeSplashAndShowMain(splash: BrowserWindow | null, win: BrowserWindow
   }
 }
 
-app.whenReady().then(() => {
-  setProductionMenu()
-  initDatabase()
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = mainWindow
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+  })
 
-  const splash = createSplashWindow()
-  mainWindow = createMainWindow({ deferShow: splash != null })
-  wireMainWindowHideToTray(mainWindow)
-  applyMainWindowAlwaysOnTop(mainWindow)
-  overlay = new OverlayController(getDb)
+  process.on('uncaughtException', (err) => {
+    console.error('[LexPatrol] uncaughtException', err)
+  })
+  process.on('unhandledRejection', (reason) => {
+    console.error('[LexPatrol] unhandledRejection', reason)
+  })
 
-  const startTray = (): void => {
-    setupSystemTray(() => mainWindow)
-  }
+  app.whenReady().then(() => {
+    setProductionMenu()
+    initDatabase()
 
-  if (splash != null && mainWindow) {
-    let fallbackTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-      fallbackTimer = null
-      closeSplashAndShowMain(splash, mainWindow!)
-      startTray()
-    }, 30000)
+    const splash = createSplashWindow()
+    mainWindow = createMainWindow({ deferShow: splash != null })
+    wireMainWindowHideToTray(mainWindow)
+    applyMainWindowAlwaysOnTop(mainWindow)
+    overlay = new OverlayController(getDb)
+    cheatToolOverlay = new ToolOverlayController(getDb, 'cheats')
+    collectionToolOverlay = new ToolOverlayController(getDb, 'collections')
 
-    const finish = (): void => {
-      if (fallbackTimer != null) {
-        clearTimeout(fallbackTimer)
+    const startTray = (): void => {
+      setupSystemTray(() => mainWindow)
+    }
+
+    if (splash != null && mainWindow) {
+      let fallbackTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
         fallbackTimer = null
+        closeSplashAndShowMain(splash, mainWindow!)
+        startTray()
+      }, 30000)
+
+      const finish = (): void => {
+        if (fallbackTimer != null) {
+          clearTimeout(fallbackTimer)
+          fallbackTimer = null
+        }
+        closeSplashAndShowMain(splash, mainWindow!)
+        startTray()
       }
-      closeSplashAndShowMain(splash, mainWindow!)
+      mainWindow.once('ready-to-show', finish)
+    } else {
       startTray()
     }
-    mainWindow.once('ready-to-show', finish)
-  } else {
-    startTray()
-  }
 
-  registerIpcHandlers({
-    getMainWindow: () => mainWindow,
-    getDb,
-    overlay,
-    openExternal: (url: string) => shell.openExternal(url)
+    registerIpcHandlers({
+      getMainWindow: () => mainWindow,
+      getDb,
+      overlay,
+      cheatToolOverlay,
+      collectionToolOverlay
+    })
+
+    ipcMain.on('app:open-external', (_e, url: unknown) => {
+      if (isSafeExternalHttpUrl(url)) void shell.openExternal(url)
+    })
+
+    applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, getDb())
+
+    scheduleStartupUpdateCheck(() => mainWindow)
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow()
+    })
   })
 
-  ipcMain.on('app:open-external', (_e, url: string) => {
-    if (typeof url === 'string' && url.startsWith('http')) shell.openExternal(url)
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      globalShortcut.unregisterAll()
+      closeDatabase()
+      app.quit()
+    }
   })
 
-  applyOverlayGlobalShortcuts(overlay, getDb())
-
-  scheduleStartupUpdateCheck(() => mainWindow)
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow()
-  })
-})
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  app.on('will-quit', () => {
+    destroyTray()
     globalShortcut.unregisterAll()
     closeDatabase()
-    app.quit()
-  }
-})
-
-app.on('will-quit', () => {
-  destroyTray()
-  globalShortcut.unregisterAll()
-  closeDatabase()
-})
+  })
+}

@@ -8,14 +8,38 @@ import { ReaderPage } from './features/reader/ReaderPage'
 import { AiPage } from './features/ai/AiPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { OverlayPage } from './features/overlay/OverlayPage'
+import { CheatOverlayPage } from './features/overlay/CheatOverlayPage'
+import { CollectionOverlayPage } from './features/overlay/CollectionOverlayPage'
 import { NotesPage } from './features/notes/NotesPage'
 import { GovernmentPage } from './features/government/GovernmentPage'
+import { CollectionsPage } from './features/collections/CollectionsPage'
+import { CheatSheetsPage } from './features/cheats/CheatSheetsPage'
 import { NavigationBridge } from './components/NavigationBridge'
 
 export default function App(): JSX.Element {
   const location = useLocation()
-  /** HashRouter: file:// и прод-сборка — pathname должен совпасть, иначе в окне оверлея отрисуется основное приложение. */
-  if (location.pathname === '/overlay' || location.pathname.startsWith('/overlay/')) {
+  const rawHash =
+    typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '').split('?')[0] || '' : ''
+  const pathFromHash = rawHash === '' ? '' : rawHash.startsWith('/') ? rawHash : `/${rawHash}`
+  const matchesRoute = (prefix: string): boolean =>
+    location.pathname === prefix ||
+    location.pathname.startsWith(`${prefix}/`) ||
+    pathFromHash === prefix ||
+    pathFromHash.startsWith(`${prefix}/`)
+
+  if (matchesRoute('/overlay-cheats')) {
+    return <CheatOverlayPage />
+  }
+  if (matchesRoute('/overlay-collections')) {
+    return <CollectionOverlayPage />
+  }
+  const isOverlay =
+    location.pathname === '/overlay' ||
+    location.pathname.startsWith('/overlay/') ||
+    pathFromHash === '/overlay' ||
+    pathFromHash.startsWith('/overlay/')
+  /** HashRouter + отдельное окно: только OverlayPage, без AppShell. */
+  if (isOverlay) {
     return <OverlayPage />
   }
 
@@ -28,6 +52,8 @@ export default function App(): JSX.Element {
         <Route path="/import" element={<ImportPage />} />
         <Route path="/browser" element={<BrowserImportPage />} />
         <Route path="/kb" element={<KnowledgeBasePage />} />
+        <Route path="/collections" element={<CollectionsPage />} />
+        <Route path="/cheats" element={<CheatSheetsPage />} />
         <Route path="/patrol" element={<GovernmentPage />} />
         <Route path="/government" element={<Navigate to="/patrol" replace />} />
         <Route path="/mvd" element={<Navigate to="/patrol" replace />} />

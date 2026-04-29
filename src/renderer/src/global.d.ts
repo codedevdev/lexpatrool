@@ -1,5 +1,6 @@
 import type {
   ImportPayload,
+  ReplaceDocumentImportPayload,
   AiProviderConfig,
   AiCompletePayload,
   AiAgentRecord,
@@ -61,10 +62,31 @@ declare global {
           toggle: string
           search: string
           clickThrough: string
-          display: { toggle: string; search: string; clickThrough: string }
+          cheatsOverlay: string
+          collectionsOverlay: string
+          display: {
+            toggle: string
+            search: string
+            clickThrough: string
+            cheatsOverlay: string
+            collectionsOverlay: string
+          }
+          defaultsDisplay: {
+            toggle: string
+            search: string
+            clickThrough: string
+            cheatsOverlay: string
+            collectionsOverlay: string
+          }
         }>
         set: (
-          partial: Partial<{ toggle: string; search: string; clickThrough: string }>
+          partial: Partial<{
+            toggle: string
+            search: string
+            clickThrough: string
+            cheatsOverlay: string
+            collectionsOverlay: string
+          }>
         ) => Promise<
           | { ok: true }
           | { ok: false; error: 'duplicate' | 'invalid'; field?: string; detail?: string }
@@ -107,10 +129,22 @@ declare global {
         update: (payload: ArticleUpdatePayload) => Promise<{ ok: boolean; error?: string }>
         delete: (id: string) => Promise<{ ok: boolean; error?: string }>
       }
-      search: { query: (q: string) => Promise<unknown[]> }
+      search: { query: (q: string, opts?: { tagIds?: string[] }) => Promise<unknown[]> }
       import: {
         payload: (payload: ImportPayload) => Promise<{ sourceId: string; documentId: string }>
-        browserPage: (payload: BrowserImportPayload) => Promise<{ sourceId: string; documentId: string }>
+        replaceDocument: (
+          payload: ReplaceDocumentImportPayload
+        ) => Promise<
+          | {
+              ok: true
+              documentId: string
+              stats: { inserted: number; updated: number; deleted: number; previousMarked: number }
+            }
+          | { ok: false; error: string }
+        >
+        browserPage: (
+          payload: BrowserImportPayload
+        ) => Promise<{ ok: true; sourceId: string; documentId: string } | { ok: false; error: string }>
       }
       parse: {
         html: (html: string, url?: string) => Promise<unknown>
@@ -159,6 +193,13 @@ declare global {
         onFocusSearch: (cb: () => void) => () => void
         onClickThroughChanged: (cb: (enabled: boolean) => void) => () => void
       }
+      toolOverlay: {
+        show: (which: 'cheats' | 'collections') => Promise<void>
+        hide: (which: 'cheats' | 'collections') => Promise<void>
+        toggle: (which: 'cheats' | 'collections') => Promise<void>
+        raise: (which: 'cheats' | 'collections') => Promise<boolean>
+        dock: (which: 'cheats' | 'collections', where: 'left' | 'right' | 'top-right' | 'center') => Promise<void>
+      }
       ai: {
         complete: (payload: AiCompletePayload) => Promise<{ text: string; citations: unknown[] }>
       }
@@ -167,9 +208,54 @@ declare global {
         save: (row: Partial<AiAgentRecord> & { name: string }) => Promise<{ id: string }>
         delete: (id: string) => Promise<boolean>
       }
-      backup: { save: () => Promise<{ ok: boolean; path?: string }> }
+      backup: { save: () => Promise<{ ok: boolean; path?: string; error?: string }> }
       shell: { openExternal: (url: string) => void }
       seed: { run: () => Promise<boolean> }
+      collections: {
+        list: () => Promise<unknown[]>
+        save: (row: {
+          id?: string
+          name: string
+          description?: string | null
+          sort_order?: number
+        }) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
+        delete: (id: string) => Promise<boolean>
+        getArticles: (collectionId: string) => Promise<unknown[]>
+        addArticle: (
+          collectionId: string,
+          articleId: string
+        ) => Promise<{ ok: true } | { ok: false; error: string }>
+        removeArticle: (collectionId: string, articleId: string) => Promise<{ ok: boolean }>
+        reorderArticles: (collectionId: string, orderedArticleIds: string[]) => Promise<boolean>
+      }
+      tags: { list: () => Promise<unknown[]> }
+      articleTags: {
+        get: (articleId: string) => Promise<unknown[]>
+        set: (articleId: string, tagNames: string[]) => Promise<{ ok: true } | { ok: false; error?: string }>
+      }
+      seeAlso: {
+        list: (fromArticleId: string) => Promise<unknown[]>
+        add: (
+          fromArticleId: string,
+          toArticleId: string
+        ) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
+        remove: (linkId: string) => Promise<boolean>
+      }
+      reader: {
+        pushRecent: (articleId: string) => Promise<boolean>
+        listRecent: (limit?: number) => Promise<unknown[]>
+      }
+      cheatSheets: {
+        list: () => Promise<unknown[]>
+        get: (id: string) => Promise<unknown>
+        save: (row: {
+          id?: string
+          title: string
+          body: string
+          sort_order?: number
+        }) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
+        delete: (id: string) => Promise<boolean>
+      }
     }
   }
 }

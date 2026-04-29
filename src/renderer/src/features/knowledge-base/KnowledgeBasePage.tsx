@@ -124,8 +124,22 @@ export function KnowledgeBasePage(): JSX.Element {
                 </Link>
                 <div className="text-xs text-app-muted">{d.source_title ?? 'Локальный импорт'}</div>
               </div>
-              <div className="flex shrink-0 items-center gap-3">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <span className="text-xs text-app-muted">{new Date(d.updated_at).toLocaleString()}</span>
+                <Link
+                  className="rounded-lg border border-white/10 px-2 py-1 text-xs text-app-muted hover:bg-white/5"
+                  to={`/import?replace=${encodeURIComponent(d.id)}`}
+                  title="Обновить вставкой текста или HTML"
+                >
+                  Обновить
+                </Link>
+                <Link
+                  className="rounded-lg border border-accent/35 bg-accent/10 px-2 py-1 text-xs font-medium text-accent hover:bg-accent/20"
+                  to={`/browser?replace=${encodeURIComponent(d.id)}`}
+                  title="Обновить страницей из встроенного браузера"
+                >
+                  Браузер
+                </Link>
                 <button
                   type="button"
                   title="Удалить документ из базы"

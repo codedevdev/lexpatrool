@@ -65,6 +65,8 @@ export interface ArticleUpdatePayload {
   summary_short?: string | null
   penalty_hint?: string | null
   display_meta_json?: string
+  /** Сбросить сохранённый текст «до обновления импорта» в читателе. */
+  clearPreviousRevision?: boolean
 }
 
 export interface SearchHit {
@@ -133,6 +135,11 @@ export interface ImportPayload {
   articleFilter?: 'all' | 'with_sanctions' | 'without_sanctions'
 }
 
+/** Повторный импорт в существующий документ: обновляет источник и статьи, при смене текста сохраняет прошлую версию в полях previous_*. */
+export type ReplaceDocumentImportPayload = ImportPayload & {
+  documentId: string
+}
+
 /** CSS или XPath 1.0 (как в браузерном document.evaluate). */
 export type DomSelectorKind = 'css' | 'xpath'
 
@@ -173,6 +180,11 @@ export interface BrowserImportPayload {
   html: string
   url: string
   title?: string
+  /**
+   * Повторный импорт в существующий документ (как `/import?replace=`): обновляет источник и статьи,
+   * при смене текста — previous_* для сравнения в читателе.
+   */
+  replaceDocumentId?: string
   /** `manual` — использовать {@link ManualDomParseRulesV1}; иначе Readability + эвристики */
   mode?: 'auto' | 'manual'
   /** Только авто: первый пост темы или все сообщения подряд (XenForo). По умолчанию первый. */
