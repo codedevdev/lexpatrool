@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import type { ArticleDisplayMeta } from '@parsers/article-enrichment'
+import type { ArticleDisplayMeta, ArticleJurisdiction } from '@parsers/article-enrichment'
 import { articleDisplayTitle } from '@shared/article-display'
 import { RouteEmptyState } from '../../components/RouteEmptyState'
+import { ArticleMetaChips } from '../../components/ArticleMetaChips'
 
 interface ArticleRow {
   id: string
@@ -60,6 +61,56 @@ function articleKindLabel(a: ArticleRow): string {
   return 'Подстатья'
 }
 
+const JURISDICTION_DOT_CLASS: Record<ArticleJurisdiction, string> = {
+  R: 'bg-emerald-400/85',
+  F: 'bg-sky-400/85',
+  A: 'bg-slate-300/70'
+}
+
+const JURISDICTION_DOT_TITLE: Record<ArticleJurisdiction, string> = {
+  R: 'R · региональная (LSPD, LSCSD)',
+  F: 'F · федеральная (FIB)',
+  A: 'A · смежная (все структуры)'
+}
+
+function ArticleTreeRowChips({ meta }: { meta: ArticleDisplayMeta | null }): JSX.Element | null {
+  if (!meta) return null
+  const items: ReactNode[] = []
+  if (meta.jurisdiction) {
+    items.push(
+      <span
+        key="jur"
+        title={JURISDICTION_DOT_TITLE[meta.jurisdiction]}
+        className={`inline-block h-1.5 w-1.5 rounded-full ${JURISDICTION_DOT_CLASS[meta.jurisdiction]}`}
+      />
+    )
+  }
+  if (meta.criminalRecord) {
+    items.push(
+      <span
+        key="cr"
+        title="CR · даёт судимость"
+        className="rounded bg-rose-500/20 px-1 text-[9px] font-semibold uppercase leading-none text-rose-100/95"
+      >
+        CR
+      </span>
+    )
+  }
+  if (meta.stars != null && meta.stars > 0) {
+    items.push(
+      <span
+        key="stars"
+        title={`${meta.stars} звезды розыска`}
+        className="rounded bg-amber-500/15 px-1 text-[9px] font-medium leading-none text-amber-100/95"
+      >
+        {meta.stars}*
+      </span>
+    )
+  }
+  if (!items.length) return null
+  return <span className="ml-2 inline-flex shrink-0 items-center gap-1 align-middle">{items}</span>
+}
+
 function ArticleNavTree({
   nodes,
   depth,
@@ -77,34 +128,40 @@ function ArticleNavTree({
 }): JSX.Element {
   return (
     <>
-      {nodes.map((n) => (
-        <div key={n.row.id} className={depth > 0 ? 'mt-0.5 border-l border-white/[0.08]' : ''}>
-          <button
-            type="button"
-            style={{ paddingLeft: `${10 + depth * 14}px` }}
-            onClick={() => {
-              onSelect(n.row)
-              if (documentId) navigate(`/reader/${documentId}/${n.row.id}`, { replace: true })
-            }}
-            className={[
-              'w-full min-w-0 rounded-r-lg py-2 text-left text-sm leading-snug',
-              activeId === n.row.id ? 'bg-white/10 text-white' : 'text-app-muted hover:bg-white/5'
-            ].join(' ')}
-          >
-            <span className="text-pretty">{articleDisplayTitle(n.row.article_number, n.row.heading)}</span>
-          </button>
-          {n.children.length > 0 ? (
-            <ArticleNavTree
-              nodes={n.children}
-              depth={depth + 1}
-              activeId={activeId}
-              documentId={documentId}
-              navigate={navigate}
-              onSelect={onSelect}
-            />
-          ) : null}
-        </div>
-      ))}
+      {nodes.map((n) => {
+        const meta = parseArticleMeta(n.row.display_meta_json)
+        return (
+          <div key={n.row.id} className={depth > 0 ? 'mt-0.5 border-l border-white/[0.08]' : ''}>
+            <button
+              type="button"
+              style={{ paddingLeft: `${10 + depth * 14}px` }}
+              onClick={() => {
+                onSelect(n.row)
+                if (documentId) navigate(`/reader/${documentId}/${n.row.id}`, { replace: true })
+              }}
+              className={[
+                'flex w-full min-w-0 items-start justify-between gap-1 rounded-r-lg py-2 pr-2 text-left text-sm leading-snug',
+                activeId === n.row.id ? 'bg-white/10 text-white' : 'text-app-muted hover:bg-white/5'
+              ].join(' ')}
+            >
+              <span className="min-w-0 flex-1 text-pretty">
+                {articleDisplayTitle(n.row.article_number, n.row.heading)}
+              </span>
+              <ArticleTreeRowChips meta={meta} />
+            </button>
+            {n.children.length > 0 ? (
+              <ArticleNavTree
+                nodes={n.children}
+                depth={depth + 1}
+                activeId={activeId}
+                documentId={documentId}
+                navigate={navigate}
+                onSelect={onSelect}
+              />
+            ) : null}
+          </div>
+        )
+      })}
     </>
   )
 }
@@ -171,13 +228,28 @@ export function ReaderPage(): JSX.Element {
   const [seeAddId, setSeeAddId] = useState('')
   const [collections, setCollections] = useState<{ id: string; name: string }[]>([])
   const [collectionPick, setCollectionPick] = useState('')
+  const [collectionToast, setCollectionToast] = useState<string | null>(null)
 
-  useEffect(() => {
+  const refreshCollectionsList = useCallback(() => {
     void window.lawHelper.collections.list().then((raw) => {
       const list = raw as { id: string; name: string }[]
-      setCollections(Array.isArray(list) ? list : [])
+      const arr = Array.isArray(list) ? list : []
+      setCollections(arr)
+      setCollectionPick((prev) => {
+        if (prev && arr.some((c) => c.id === prev)) return prev
+        return arr[0]?.id ?? ''
+      })
     })
   }, [])
+
+  useEffect(() => {
+    refreshCollectionsList()
+  }, [refreshCollectionsList])
+
+  useEffect(() => {
+    const off = window.lawHelper.collections.onChanged(() => refreshCollectionsList())
+    return () => off()
+  }, [refreshCollectionsList])
 
   useEffect(() => {
     if (!active?.id) {
@@ -462,9 +534,28 @@ export function ReaderPage(): JSX.Element {
   }
 
   async function addToCollection(): Promise<void> {
-    if (!active || !collectionPick) return
+    if (!active) return
+    if (!collectionPick) {
+      alert('Выберите подборку в списке (или создайте подборку в разделе «Подборки»).')
+      return
+    }
     const r = await window.lawHelper.collections.addArticle(collectionPick, active.id)
-    if (!r.ok) alert('Не удалось добавить в подборку.')
+    if (!r.ok) {
+      const err = r.error
+      const msg =
+        err === 'article'
+          ? 'Статья не найдена в базе.'
+          : err === 'collection'
+            ? 'Подборка не найдена. Откройте раздел «Подборки» и вернитесь в читатель.'
+            : err === 'ids'
+              ? 'Не выбрана подборка.'
+              : 'Не удалось добавить в подборку.'
+      alert(msg)
+      return
+    }
+    setCollectionToast('Статья добавлена в подборку.')
+    window.setTimeout(() => setCollectionToast(null), 2800)
+    refreshCollectionsList()
   }
 
   async function clearRevision(): Promise<void> {
@@ -710,6 +801,14 @@ export function ReaderPage(): JSX.Element {
                   ? 'Нет статей'
                   : 'Выберите статью слева'}
             </h1>
+            {active && !articleEdit && activeMeta ? (
+              <ArticleMetaChips
+                meta={activeMeta}
+                size="md"
+                omitBail
+                className="mt-3 flex flex-wrap items-center gap-2"
+              />
+            ) : null}
             {active && sourceUrl && (
               <button
                 type="button"
@@ -825,29 +924,36 @@ export function ReaderPage(): JSX.Element {
                   </div>
                 ) : null}
                 {collections.length > 0 ? (
-                  <>
-                    <select
-                      className="max-w-[10rem] rounded-lg border border-white/10 bg-surface-raised px-2 py-2 text-xs text-white outline-none focus:border-accent"
-                      value={collectionPick}
-                      disabled={articleEdit}
-                      onChange={(e) => setCollectionPick(e.target.value)}
-                    >
-                      <option value="">В подборку…</option>
-                      {collections.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="flex w-full min-w-0 max-w-md flex-col gap-2 sm:flex-row sm:items-end">
+                    <label className="min-w-0 flex-1 text-[10px] font-medium uppercase tracking-wide text-app-muted">
+                      Подборка
+                      <select
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-surface-raised px-2 py-2 text-xs text-white outline-none focus:border-accent"
+                        value={collectionPick}
+                        disabled={articleEdit}
+                        onChange={(e) => setCollectionPick(e.target.value)}
+                      >
+                        <option value="">Выберите подборку…</option>
+                        {collections.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <button
                       type="button"
+                      title="Добавить открытую статью в выбранную подборку (для оверлея и окна подборок)"
                       disabled={articleEdit || !collectionPick}
                       onClick={() => void addToCollection()}
-                      className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white hover:bg-white/10 disabled:opacity-40"
+                      className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent-dim disabled:opacity-40"
                     >
-                      +
+                      Добавить в подборку
                     </button>
-                  </>
+                    {collectionToast ? (
+                      <span className="self-center text-xs text-emerald-200/90 sm:ml-1">{collectionToast}</span>
+                    ) : null}
+                  </div>
                 ) : null}
               </>
             )}

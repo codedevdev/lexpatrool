@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { articleDisplayTitle } from '@shared/article-display'
 import { extractPenaltyHints } from '@parsers/article-split'
-
-interface ArticleDisplayMeta {
-  stars?: number
-  fineUsd?: number
-  fineRub?: number
-  ukArticle?: string
-  tags?: string[]
-  bailHint?: string
-}
+import type { ArticleDisplayMeta } from '@parsers/article-enrichment'
+import { ArticleMetaChips } from '@/components/ArticleMetaChips'
 
 interface Pinned {
   id: string
@@ -1329,45 +1322,14 @@ function OverlayOptionToggle({
 }
 
 function MetaChips({ meta, omitBail }: { meta: ArticleDisplayMeta; omitBail?: boolean }): JSX.Element | null {
-  const chips: ReactNode[] = []
-  if (!omitBail && meta.bailHint?.trim()) {
-    const b = meta.bailHint.trim()
-    chips.push(
-      <span key="bail" className="max-w-full truncate rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-100/95" title={b}>
-        Залог {b.length > 48 ? `${b.slice(0, 45)}…` : b}
-      </span>
-    )
-  }
-  if (meta.stars != null && meta.stars > 0) {
-    chips.push(
-      <span key="stars" className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-100/95">
-        ★ {meta.stars}
-      </span>
-    )
-  }
-  if (meta.fineUsd != null && meta.fineUsd > 0) {
-    chips.push(
-      <span key="usd" className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-100/90">
-        {Math.round(meta.fineUsd).toLocaleString('ru-RU')}$
-      </span>
-    )
-  }
-  if (meta.fineRub != null && meta.fineRub > 0) {
-    chips.push(
-      <span key="rub" className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-100/90">
-        {Math.round(meta.fineRub).toLocaleString('ru-RU')} ₽
-      </span>
-    )
-  }
-  if (meta.ukArticle) {
-    chips.push(
-      <span key="uk" className="rounded bg-violet-500/15 px-1.5 py-0.5 text-violet-100/90">
-        УК {meta.ukArticle}
-      </span>
-    )
-  }
-  if (!chips.length) return null
-  return <div className="mt-2 flex flex-wrap gap-1">{chips}</div>
+  return (
+    <ArticleMetaChips
+      meta={meta}
+      size="sm"
+      omitBail={omitBail}
+      className="mt-2 flex flex-wrap items-center gap-1"
+    />
+  )
 }
 
 function filterBody(body: string, q: string): string {

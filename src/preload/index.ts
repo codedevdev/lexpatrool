@@ -176,13 +176,18 @@ const api = {
       | { ok: true; articles: unknown[] }
       | { ok: false; error: string }
     > => ipcRenderer.invoke('parse:manual-dom', html, url, rules),
-    resolveArticleSplits: (rawText: string, title: string): Promise<unknown[]> =>
-      ipcRenderer.invoke('parse:resolve-article-splits', rawText, title),
+    resolveArticleSplits: (
+      rawText: string,
+      title: string,
+      articleFilter?: 'all' | 'with_sanctions' | 'without_sanctions'
+    ): Promise<unknown[]> =>
+      ipcRenderer.invoke('parse:resolve-article-splits', rawText, title, articleFilter),
     autoImportPreview: (
       html: string,
       url: string | undefined,
       title: string,
-      forumScope?: 'first' | 'all'
+      forumScope?: 'first' | 'all',
+      articleFilter?: 'all' | 'with_sanctions' | 'without_sanctions'
     ): Promise<{
       title: string
       documentTitle: string
@@ -190,7 +195,15 @@ const api = {
       textSource: string
       excerpt: string | null
       splits: unknown[]
-    }> => ipcRenderer.invoke('parse:auto-import-preview', html, url, title, forumScope)
+    }> =>
+      ipcRenderer.invoke(
+        'parse:auto-import-preview',
+        html,
+        url,
+        title,
+        forumScope,
+        articleFilter
+      )
   },
   overlay: {
     show: (): Promise<void> => ipcRenderer.invoke('overlay:show'),
@@ -277,7 +290,12 @@ const api = {
     removeArticle: (collectionId: string, articleId: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('collections:removeArticle', collectionId, articleId),
     reorderArticles: (collectionId: string, orderedArticleIds: string[]): Promise<boolean> =>
-      ipcRenderer.invoke('collections:reorderArticles', collectionId, orderedArticleIds)
+      ipcRenderer.invoke('collections:reorderArticles', collectionId, orderedArticleIds),
+    onChanged: (cb: () => void): (() => void) => {
+      const handler = (): void => cb()
+      ipcRenderer.on('collections:changed', handler)
+      return () => ipcRenderer.removeListener('collections:changed', handler)
+    }
   },
   tags: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('tags:list')

@@ -154,12 +154,17 @@ declare global {
           url: string | undefined,
           rules: ManualDomParseRulesV1
         ) => Promise<{ ok: true; articles: unknown[] } | { ok: false; error: string }>
-        resolveArticleSplits: (rawText: string, title: string) => Promise<unknown[]>
+        resolveArticleSplits: (
+          rawText: string,
+          title: string,
+          articleFilter?: 'all' | 'with_sanctions' | 'without_sanctions'
+        ) => Promise<unknown[]>
         autoImportPreview: (
           html: string,
           url: string | undefined,
           title: string,
-          forumScope?: 'first' | 'all'
+          forumScope?: 'first' | 'all',
+          articleFilter?: 'all' | 'with_sanctions' | 'without_sanctions'
         ) => Promise<{
           title: string
           documentTitle: string
@@ -234,6 +239,7 @@ declare global {
         ) => Promise<{ ok: true } | { ok: false; error: string }>
         removeArticle: (collectionId: string, articleId: string) => Promise<{ ok: boolean }>
         reorderArticles: (collectionId: string, orderedArticleIds: string[]) => Promise<boolean>
+        onChanged: (cb: () => void) => () => void
       }
       tags: { list: () => Promise<unknown[]> }
       articleTags: {

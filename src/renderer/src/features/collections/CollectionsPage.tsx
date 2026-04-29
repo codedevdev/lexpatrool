@@ -24,6 +24,11 @@ export function CollectionsPage(): JSX.Element {
     void refresh()
   }, [refresh])
 
+  useEffect(() => {
+    const off = window.lawHelper.collections.onChanged(() => void refresh())
+    return () => off()
+  }, [refresh])
+
   async function addCollection(): Promise<void> {
     setHint(null)
     const n = name.trim()
@@ -45,8 +50,7 @@ export function CollectionsPage(): JSX.Element {
         <div>
           <h1 className="text-2xl font-semibold text-white">Сменные подборки</h1>
           <p className="mt-2 max-w-2xl text-sm text-app-muted">
-            Группы статей для разных ситуаций на смене (ДТП, задержание, EMS…). В оверлее закрепов — компактный список;
-            для быстрого доступа в игре — отдельное окно.
+            Группы статей для разных ситуаций на смене (ДТП, задержание, EMS…). Добавляйте статьи из читателя или на странице «Состав и поиск». В оверлее закрепов — компактный список; для игры — отдельное окно.
           </p>
         </div>
         <button
@@ -104,7 +108,13 @@ export function CollectionsPage(): JSX.Element {
                     Статей: {typeof c.article_count === 'number' ? c.article_count : '—'}
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Link
+                    to={`/collections/${c.id}`}
+                    className="rounded-lg border border-accent/35 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/20"
+                  >
+                    Состав и поиск
+                  </Link>
                   <Link
                     to={`/kb?q=${encodeURIComponent(c.name)}`}
                     className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-app-muted hover:bg-white/5"

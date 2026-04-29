@@ -1,6 +1,6 @@
-import { app, ipcMain, dialog, globalShortcut } from 'electron'
+import { app, ipcMain, dialog, globalShortcut, BrowserWindow } from 'electron'
 import { setMainWindowAlwaysOnTop } from '../window-always-on-top'
-import type { BrowserWindow } from 'electron'
+import type { BrowserWindow as ElectronBrowserWindow } from 'electron'
 import { writeFileSync, readFileSync } from 'fs'
 import type { Database } from 'better-sqlite3'
 
@@ -32,6 +32,10 @@ import { parseHtmlWithReadability } from '../../parsers/readability-import'
 import { resolveArticleSplits } from '../../parsers/resolve-article-splits'
 import type { SplitArticle } from '../../parsers/article-split'
 import { logParse, logParseDump, parseTraceVerbose } from '../../parsers/parse-trace'
+import {
+  filterArticleSplits,
+  type ArticleImportFilter
+} from '../../parsers/article-import-filter'
 import { insertArticlesFromSplits, replaceDocumentArticlesFromSplits } from '../article-splits-persist'
 import { retrieveChunksForQuery, snippetForArticleBody } from '../../services/retrieval'
 import {
@@ -58,7 +62,7 @@ import { LEX_BACKUP_TABLE_ORDER } from '../backup-tables'
 import { parseBackupJson, restoreDatabaseFromBackupData } from '../backup-restore'
 
 export interface IpcContext {
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => ElectronBrowserWindow | null
   getDb: () => Database
   overlay: OverlayController
   cheatToolOverlay: ToolOverlayController
@@ -67,6 +71,22 @@ export interface IpcContext {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+/**
+ * Превью разбиения должно показывать ровно те блоки, которые попадут в БД при выбранном
+ * фильтре. Передаваемое из renderer значение нормализуем к ArticleImportFilter.
+ */
+function applyArticleFilterPreview(
+  splits: SplitArticle[],
+  raw: unknown
+): SplitArticle[] {
+  const f =
+    raw === 'with_sanctions' || raw === 'without_sanctions' || raw === 'all'
+      ? (raw as ArticleImportFilter)
+      : 'all'
+  if (f === 'all') return splits
+  return filterArticleSplits(splits, f)
 }
 
 function ensureTagByName(db: Database, name: string): string | null {
@@ -94,6 +114,16 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     cheatToolOverlay.reloadIfOpen()
     collectionToolOverlay.reloadIfOpen()
     applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, getDb())
+  }
+
+  function broadcastCollectionsChanged(): void {
+    for (const w of BrowserWindow.getAllWindows()) {
+      try {
+        if (!w.isDestroyed()) w.webContents.send('collections:changed')
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   ipcMain.handle('app:get-version', async () => {
@@ -745,24 +775,36 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle('parse:resolve-article-splits', (_e, rawText: string, title: string) => {
-    return resolveArticleSplits(rawText, title ?? '', true)
-  })
+  ipcMain.handle(
+    'parse:resolve-article-splits',
+    (_e, rawText: string, title: string, articleFilter?: ArticleImportFilter) => {
+      const splits = resolveArticleSplits(rawText, title ?? '', true)
+      return applyArticleFilterPreview(splits, articleFilter)
+    }
+  )
 
   ipcMain.handle(
     'parse:auto-import-preview',
-    (_e, html: string, url: string | undefined, title: string, forumScope?: 'first' | 'all') => {
+    (
+      _e,
+      html: string,
+      url: string | undefined,
+      title: string,
+      forumScope?: 'first' | 'all',
+      articleFilter?: ArticleImportFilter
+    ) => {
       const scope = forumScope === 'all' ? 'all' : 'first'
       const r = parseHtmlWithReadability(html, url, { forumScope: scope })
       const docTitle = (title ?? '').trim() || r.title || 'Импорт'
       const splits = resolveArticleSplits(r.text, docTitle, true)
+      const filtered = applyArticleFilterPreview(splits, articleFilter)
       return {
         title: r.title,
         documentTitle: docTitle,
         textLength: r.text.length,
         textSource: r.textSource ?? 'readability',
         excerpt: r.excerpt,
-        splits
+        splits: filtered
       }
     }
   )
@@ -1013,6 +1055,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
           `INSERT INTO article_collections (id, name, description, sort_order, created_at) VALUES (?, ?, ?, ?, ?)`
         ).run(id, name, row.description?.trim() || null, sort, t)
       }
+      broadcastCollectionsChanged()
       return { ok: true as const, id }
     }
   )
@@ -1020,6 +1063,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('collections:delete', (_e, id: string) => {
     if (!id?.trim()) return false
     getDb().prepare('DELETE FROM article_collections WHERE id = ?').run(id.trim())
+    broadcastCollectionsChanged()
     return true
   })
 
@@ -1058,6 +1102,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     db.prepare(
       `INSERT INTO article_collection_items (collection_id, article_id, sort_order) VALUES (?, ?, ?)`
     ).run(cid, aid, max.m + 1)
+    broadcastCollectionsChanged()
     return { ok: true as const }
   })
 
@@ -1066,6 +1111,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     const r = db
       .prepare('DELETE FROM article_collection_items WHERE collection_id = ? AND article_id = ?')
       .run(collectionId?.trim(), articleId?.trim())
+    if (r.changes > 0) broadcastCollectionsChanged()
     return { ok: r.changes > 0 }
   })
 
@@ -1082,6 +1128,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       })
     })
     tx()
+    broadcastCollectionsChanged()
     return true
   })
 

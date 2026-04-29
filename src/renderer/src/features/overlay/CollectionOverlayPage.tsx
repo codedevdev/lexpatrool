@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { articleDisplayTitle } from '@shared/article-display'
 import { ToolOverlayFrame } from './ToolOverlayFrame'
 
@@ -23,6 +23,17 @@ export function CollectionOverlayPage(): JSX.Element {
   const [collectionId, setCollectionId] = useState<string>('')
   const [articles, setArticles] = useState<CollArticle[]>([])
   const [q, setQ] = useState('')
+  const collectionIdRef = useRef('')
+
+  const reloadArticlesFor = useCallback(async (id: string) => {
+    if (!id) {
+      setArticles([])
+      return
+    }
+    const raw = await window.lawHelper.collections.getArticles(id)
+    const rows = raw as CollArticle[]
+    setArticles(Array.isArray(rows) ? rows : [])
+  }, [])
 
   const refreshCollections = useCallback(async () => {
     const list = (await window.lawHelper.collections.list()) as CollectionRow[]
@@ -34,20 +45,23 @@ export function CollectionOverlayPage(): JSX.Element {
     })
   }, [])
 
+  collectionIdRef.current = collectionId
+
   useEffect(() => {
     void refreshCollections()
   }, [refreshCollections])
 
   useEffect(() => {
-    if (!collectionId) {
-      setArticles([])
-      return
-    }
-    void window.lawHelper.collections.getArticles(collectionId).then((raw) => {
-      const rows = raw as CollArticle[]
-      setArticles(Array.isArray(rows) ? rows : [])
+    const off = window.lawHelper.collections.onChanged(() => {
+      void refreshCollections()
+      void reloadArticlesFor(collectionIdRef.current)
     })
-  }, [collectionId])
+    return () => off()
+  }, [refreshCollections, reloadArticlesFor])
+
+  useEffect(() => {
+    void reloadArticlesFor(collectionId)
+  }, [collectionId, reloadArticlesFor])
 
   const filteredCols = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -66,7 +80,7 @@ export function CollectionOverlayPage(): JSX.Element {
     <ToolOverlayFrame
       which="collections"
       title="LexPatrol · подборки"
-      footerHint="Статья — открыть в читателе главного окна · Esc — скрыть"
+      footerHint="Статья — открыть в читателе · список обновляется при добавлении в главном окне · Esc — скрыть"
     >
       <div className="flex h-full min-h-0 flex-col gap-2">
         <div className="flex shrink-0 gap-2">
@@ -78,7 +92,12 @@ export function CollectionOverlayPage(): JSX.Element {
           />
           <button
             type="button"
-            onClick={() => void refreshCollections()}
+            onClick={() => {
+              void (async () => {
+                await refreshCollections()
+                await reloadArticlesFor(collectionIdRef.current)
+              })()
+            }}
             className="shrink-0 rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-[10px] text-white/80 hover:bg-white/10"
           >
             ↻

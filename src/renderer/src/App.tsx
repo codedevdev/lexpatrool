@@ -13,6 +13,7 @@ import { CollectionOverlayPage } from './features/overlay/CollectionOverlayPage'
 import { NotesPage } from './features/notes/NotesPage'
 import { GovernmentPage } from './features/government/GovernmentPage'
 import { CollectionsPage } from './features/collections/CollectionsPage'
+import { CollectionDetailPage } from './features/collections/CollectionDetailPage'
 import { CheatSheetsPage } from './features/cheats/CheatSheetsPage'
 import { NavigationBridge } from './components/NavigationBridge'
 
@@ -53,6 +54,7 @@ export default function App(): JSX.Element {
         <Route path="/browser" element={<BrowserImportPage />} />
         <Route path="/kb" element={<KnowledgeBasePage />} />
         <Route path="/collections" element={<CollectionsPage />} />
+        <Route path="/collections/:collectionId" element={<CollectionDetailPage />} />
         <Route path="/cheats" element={<CheatSheetsPage />} />
         <Route path="/patrol" element={<GovernmentPage />} />
         <Route path="/government" element={<Navigate to="/patrol" replace />} />

@@ -11,6 +11,12 @@ import {
 } from './article-split'
 import { logParse, logParseDump, parseTraceVerbose, previewLines } from './parse-trace'
 
+/** Юрисдикция статьи из классификатора форума: R — региональная, F — федеральная, A — смежная. */
+export type ArticleJurisdiction = 'R' | 'F' | 'A'
+
+/** Тяжесть преступления по уровню розыска (звёзды): 1-2* — лёгкая, 3* — средняя, 4-5* — высокая. */
+export type ArticleSeverityTier = 'light' | 'medium' | 'high'
+
 export interface ArticleDisplayMeta {
   stars?: number
   fineUsd?: number
@@ -19,6 +25,63 @@ export interface ArticleDisplayMeta {
   tags?: string[]
   /** Выход под залог (отдельно от «Наказание», чтобы не путать в карточке). */
   bailHint?: string
+  /** Юрисдикция (R/F/A) из классификатора `(R, CR)` / `(F)` / `(A, CR)` в заголовке. */
+  jurisdiction?: ArticleJurisdiction
+  /** Флаг «оставляет судимость» — `CR` в скобочном классификаторе. */
+  criminalRecord?: boolean
+  /** Категория тяжести по звёздам (light/medium/high). */
+  severityTier?: ArticleSeverityTier
+}
+
+/** R/F/A — исходный латинский набор; Р/Ф/А — кириллические эквиваленты, иногда встречаются в копипастах. */
+const JURISDICTION_LETTER_MAP: Record<string, ArticleJurisdiction> = {
+  r: 'R',
+  f: 'F',
+  a: 'A',
+  р: 'R',
+  ф: 'F',
+  а: 'A'
+}
+
+export function severityTierFromStars(stars: number | undefined | null): ArticleSeverityTier | undefined {
+  if (!stars || stars < 1) return undefined
+  if (stars <= 2) return 'light'
+  if (stars === 3) return 'medium'
+  return 'high'
+}
+
+export const JURISDICTION_LABELS: Record<
+  ArticleJurisdiction,
+  { short: string; long: string; tooltip: string }
+> = {
+  R: {
+    short: 'LSPD · LSCSD',
+    long: 'Региональная',
+    tooltip: 'R · Региональная юрисдикция: LSPD, LSCSD'
+  },
+  F: {
+    short: 'FIB',
+    long: 'Федеральная',
+    tooltip: 'F · Федеральная юрисдикция: FIB'
+  },
+  A: {
+    short: 'Все структуры',
+    long: 'Смежная',
+    tooltip: 'A · Смежная юрисдикция: доступно всем структурам без ограничений'
+  }
+}
+
+export const SEVERITY_LABELS: Record<ArticleSeverityTier, string> = {
+  light: 'лёгкая тяжесть',
+  medium: 'средняя тяжесть',
+  high: 'высокая тяжесть'
+}
+
+/** Подсказка с диапазоном звёзд для тяжести (1-2*, 3*, 4-5*). */
+export const SEVERITY_TOOLTIPS: Record<ArticleSeverityTier, string> = {
+  light: 'Лёгкая степень тяжести (приоритет розыска 1-2*)',
+  medium: 'Средняя степень тяжести (приоритет розыска 3*)',
+  high: 'Высокая степень тяжести (приоритет розыска 4-5*)'
 }
 
 export interface ArticleEnrichment {
@@ -162,6 +225,7 @@ export interface EnrichArticleOptions {
 export function enrichArticle(heading: string, body: string, options?: EnrichArticleOptions): ArticleEnrichment {
   const meta: ArticleDisplayMeta = {}
   const text = body.replace(/\r\n/g, '\n')
+  const headingPlusBody = `${heading}\n${text}`
 
   const uk = text.match(/(?:^|\s)(\d+[\d.]*)\s*УК\b/i) || text.match(/УК\s*(?:ст\.?)?\s*(\d+[\d.]*)/i)
   if (uk) meta.ukArticle = uk[1]
@@ -181,11 +245,39 @@ export function enrichArticle(heading: string, body: string, options?: EnrichArt
     if (!Number.isNaN(n)) meta.fineRub = n
   }
 
-  const stars =
-    text.match(/(\d)\s*(?:звезд|звёзд|уровн)/i) || text.match(/(?:розыск|★)\s*:?\s*(\d)/i) || text.match(/★{1,5}/)
-  if (stars) {
-    const n = stars[0]!.includes('★') ? (stars[0]!.match(/★/g) ?? []).length : parseInt(stars[1] ?? '0', 10)
-    if (n > 0 && n <= 6) meta.stars = n
+  // Звёзды: сначала ищем табличный шаблон `| 3*` / «… 3*» в конце заголовка-строки (форум),
+  // потом — описательные «3 звезды/уровень розыска», и в последнюю очередь — литералы ★.
+  const starsTable =
+    headingPlusBody.match(/\|\s*(\d)\s*\*+/) ||
+    headingPlusBody.match(/(?:^|\n)[^\n|]*?(?<![\d.])(\d)\s*\*+\s*(?:\n|$)/)
+  const starsDescriptive =
+    text.match(/(\d)\s*(?:звезд|звёзд|уровн)/i) ||
+    text.match(/(?:розыск|★)\s*:?\s*(\d)/i)
+  const starsLiteral = text.match(/★{1,5}/)
+  let starsValue = 0
+  if (starsTable) {
+    starsValue = parseInt(starsTable[1] ?? '0', 10)
+  } else if (starsDescriptive) {
+    starsValue = parseInt(starsDescriptive[1] ?? '0', 10)
+  } else if (starsLiteral) {
+    starsValue = (starsLiteral[0]!.match(/★/g) ?? []).length
+  }
+  if (starsValue > 0 && starsValue <= 6) {
+    meta.stars = starsValue
+    const tier = severityTierFromStars(starsValue)
+    if (tier) meta.severityTier = tier
+  }
+
+  // Юрисдикция и судимость из скобочного классификатора `(R, CR)` / `(F)` / `(A, CR)`.
+  // Ищем сначала в заголовке (там классификатор стоит рядом с номером статьи), потом в теле.
+  const classifier =
+    heading.match(/\(\s*([RFAРФА])\s*(?:,\s*(CR))?\s*\)/i) ||
+    text.match(/\(\s*([RFAРФА])\s*(?:,\s*(CR))?\s*\)/i)
+  if (classifier) {
+    const letter = classifier[1]!.toLowerCase()
+    const mapped = JURISDICTION_LETTER_MAP[letter]
+    if (mapped) meta.jurisdiction = mapped
+    if (classifier[2]) meta.criminalRecord = true
   }
 
   if (/эвакуаци/i.test(text)) meta.tags = [...(meta.tags ?? []), 'эвакуация']

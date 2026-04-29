@@ -283,7 +283,8 @@ export function BrowserImportPage(): JSX.Element {
         snap.html,
         snap.href,
         snap.title,
-        form.forumScope
+        form.forumScope,
+        form.articleFilter
       )
       setPreview(data.splits as SplitArticle[])
       setAutoPreviewInfo({
@@ -339,7 +340,8 @@ export function BrowserImportPage(): JSX.Element {
         const rawText = articles.map((a) => a.body).join('\n\n---\n\n')
         articles = (await window.lawHelper.parse.resolveArticleSplits(
           rawText,
-          snap.title
+          snap.title,
+          form.articleFilter
         )) as SplitArticle[]
       }
       setPreview(articles)

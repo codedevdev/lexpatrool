@@ -36,14 +36,16 @@ export function isEnumerateClauseLine(line: string): boolean {
 }
 
 /**
- * Номер без слова «Статья»: 7.1 (A, CR) Похищение… | 4.11. Классификация…
- * Не ловим даты вида 2024.01.15 (нет пробела + буквы после номера).
+ * Номер без слова «Статья»: 7.1 (A, CR) Похищение… — только с обязательным
+ * скобочным маркером классификатора УК/АК. Голые «1.1 Надеть наручники…» из
+ * процессуальных кодексов под этот шаблон НЕ попадают (это пункт перечня).
+ * Также не ловим даты вида 2024.01.15.
  */
 function isBareNumberedLegalHeading(line: string): boolean {
   const t = line.trim()
   if (isProseQuantityOrPercentLine(t)) return false
   if (isEnumerateClauseLine(t)) return false
-  return /^(?:\d+(?:\.\d+)+)\.?(?:\s*\([^)]{0,160}\))?\s+\S/.test(t)
+  return /^(?:\d+(?:\.\d+)+)\.?\s*\([^)]{0,160}\)\s+\S/.test(t)
 }
 
 /** Строка только с картинкой markdown / пустой декор — не заголовок статьи. */
@@ -157,7 +159,8 @@ export function detectArticleNumber(line: string): string | null {
     () => t.match(/^(?:Статья|статья|ст\.)\s+(\d+(?:\.\d+)*)\b/i),
     () => t.match(/^(?:Часть|часть)\s+([\d.]+)/i),
     () => t.match(/^(?:ч\.|Ч\.)\s*([\d.]+)/i),
-    () => t.match(/^(\d+(?:\.\d+)+)\.?(?:\s*\([^)]*\))?\s+/),
+    // Голый номер «7.1 (A, CR)» — только с обязательным скобочным маркером УК/АК.
+    () => t.match(/^(\d+(?:\.\d+)+)\.?\s*\([^)]*\)\s+/),
     () => t.match(/Article\s+([\d.]+)/i),
     () => t.match(/§\s*([\d.]+)/),
     () => t.match(/^(?:Пункт|п\.)\s*([\d.]+)/i),
@@ -184,14 +187,33 @@ export function splitEmbeddedSubArticleLines(text: string): string {
 }
 
 /**
- * Соседняя статья «15.6 (F, CR) …» в одной строке с «…наказание.» — только пробелы между предложением и номером.
- * `(?!\.)` после второго сегмента: не матчить префикс «10.3» у «10.3.1».
+ * Соседняя статья «6.1 (A, CR) …» / «15.6 (F, CR) …» в одной строке с «…наказание.» — только пробелы
+ * между предложением и номером. `(?!\.)` после второго сегмента: не матчить префикс «10.3» у «10.3.1».
+ *
+ * Раньше требовали `\d{2,}` в первой группе, чтобы не путать с «1.5 млн» — но скобочный классификатор
+ * после номера уже даёт сильный фильтр, поэтому теперь принимаем и одноразрядные главы (6, 7, 8).
  */
 function splitTwoPartTaggedArticleLines(text: string): string {
   return text.replace(
-    /(?<=[.!?;:\u2026\)])[ \t]+(?=\d{2,}\.\d{1,4}(?!\.)\s*\([^)]{0,160}\)\s+\S)/g,
+    /(?<=[.!?;:\u2026\)])[ \t]+(?=\d{1,3}\.\d{1,4}(?!\.)\s*\([^)]{0,160}\)\s+\S)/g,
     '\n'
   )
+}
+
+/**
+ * «…наказание.Часть 2. …» — точка перед «Часть N» / «ч. N» без пробела;
+ * иначе блок Части прилипает к телу предыдущей статьи и не выделяется в отдельный заголовок.
+ */
+function splitDotGluedPart(text: string): string {
+  return text.replace(/(?<=[.!?;:\u2026\)])(?=(?:Часть|часть)\s+\d+(?:\.\d+)*\b)/g, '\n')
+}
+
+/**
+ * Аналогично `splitDotGluedGlava`, но для «.Статья N.M» — страховка к `splitGluedChapterStatyaLine`,
+ * который требует, чтобы строка начиналась с «Глава». Здесь покрываем любой остаток строки.
+ */
+function splitDotGluedStatya(text: string): string {
+  return text.replace(/(?<=[.!?;:\u2026\)])(?=(?:Статья|статья|Article)\s+\d+(?:\.\d+)*\b)/g, '\n')
 }
 
 /**
@@ -216,8 +238,9 @@ export function splitLetterGluedLegalArticles(text: string): string {
 }
 
 /**
- * Общий порядок до expandGluedChapterArticleLines: invisible glue, .Глава, вложенные номера, буква+номер.
- * При LEX_PARSE_DIAG=1 / LEX_PARSE_DEBUG=1 — пошаговые метрики в консоль ([LexPatrol][parse] preprocess:…).
+ * Общий порядок до expandGluedChapterArticleLines: invisible glue, .Глава/.Статья/.Часть,
+ * вложенные номера, склейки буква+номер. При LEX_PARSE_DIAG=1 / LEX_PARSE_DEBUG=1 —
+ * пошаговые метрики в консоль ([LexPatrol][parse] preprocess:…).
  */
 export function preprocessForumCodecPlainText(raw: string): string {
   let s = stripInvisibleForumGlue(raw)
@@ -225,6 +248,12 @@ export function preprocessForumCodecPlainText(raw: string): string {
   let prev = s
   s = splitDotGluedGlava(s)
   if (shouldLogParsePipeline()) logParsePipelineStep('splitDotGluedGlava', prev, s)
+  prev = s
+  s = splitDotGluedStatya(s)
+  if (shouldLogParsePipeline()) logParsePipelineStep('splitDotGluedStatya', prev, s)
+  prev = s
+  s = splitDotGluedPart(s)
+  if (shouldLogParsePipeline()) logParsePipelineStep('splitDotGluedPart', prev, s)
   prev = s
   s = splitEmbeddedSubArticleLines(s)
   if (shouldLogParsePipeline()) logParsePipelineStep('splitEmbeddedSubArticleLines', prev, s)
