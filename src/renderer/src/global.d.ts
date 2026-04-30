@@ -3,11 +3,26 @@ import type {
   ReplaceDocumentImportPayload,
   AiProviderConfig,
   AiCompletePayload,
+  AiCompleteResult,
+  AiChatTurnPayload,
+  AiChatCreatePayload,
+  AiChatAppendTurnPayload,
+  AiConversationSummary,
+  AiChatGetResult,
   AiAgentRecord,
-  AiCitation,
+  AiEmbeddingsProgress,
+  AiEmbeddingsStatus,
   BrowserImportPayload,
   ManualDomParseRulesV1,
-  ArticleUpdatePayload
+  ArticleUpdatePayload,
+  ArticleCollectionRecord,
+  ArticleCollectionSavePayload,
+  BookmarkArticleRecord,
+  CheatSheetRecord,
+  CheatSheetSavePayload,
+  CollectionArticleRecord,
+  UserNoteRecord,
+  UserNoteSavePayload
 } from '@shared/types'
 import type React from 'react'
 
@@ -79,6 +94,13 @@ declare global {
             cheatsOverlay: string
             collectionsOverlay: string
           }
+          registration: {
+            toggle: boolean
+            search: boolean
+            clickThrough: boolean
+            cheatsOverlay: boolean
+            collectionsOverlay: boolean
+          }
         }>
         set: (
           partial: Partial<{
@@ -95,19 +117,14 @@ declare global {
         resetDefaults: () => Promise<{ ok: true }>
       }
       notes: {
-        list: () => Promise<unknown[]>
-        get: (id: string) => Promise<unknown>
-        save: (payload: {
-          id?: string
-          article_id?: string | null
-          scenario_key?: string | null
-          title?: string | null
-          body: string
-        }) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
+        list: () => Promise<UserNoteRecord[]>
+        get: (id: string) => Promise<UserNoteRecord | null>
+        save: (payload: UserNoteSavePayload) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
         delete: (id: string) => Promise<{ ok: boolean }>
+        onChanged: (cb: () => void) => () => void
       }
       bookmarks: {
-        list: () => Promise<unknown[]>
+        list: () => Promise<BookmarkArticleRecord[]>
         has: (articleId: string) => Promise<boolean>
         add: (
           articleId: string
@@ -179,10 +196,47 @@ declare global {
         toggle: () => Promise<void>
         hide: () => Promise<void>
         raise: () => Promise<boolean>
+        applyGameProfile: () => Promise<{
+          ok: true
+          opacity: number
+          clickThrough: boolean
+          aotLevel: 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
+          interactionMode: 'game' | 'interactive'
+          dock:
+            | 'left'
+            | 'right'
+            | 'top-right'
+            | 'center'
+            | 'top-left'
+            | 'bottom-left'
+            | 'bottom-right'
+            | 'compact-top-right'
+            | 'wide-right'
+          uiPrefs: {
+            opacity?: number
+            layoutPreset?: 'compact' | 'reading' | 'full'
+            focusMode?: boolean
+            fontScale?: number
+            toolsExpanded?: boolean
+            cheatSheetMode?: boolean
+            articleListMode?: 'cards' | 'dense'
+          }
+        }>
         setAlwaysOnTopLevel: (
           level: 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
         ) => Promise<boolean>
-        dock: (where: 'left' | 'right' | 'top-right' | 'center') => Promise<void>
+        dock: (
+          where:
+            | 'left'
+            | 'right'
+            | 'top-right'
+            | 'center'
+            | 'top-left'
+            | 'bottom-left'
+            | 'bottom-right'
+            | 'compact-top-right'
+            | 'wide-right'
+        ) => Promise<void>
         pin: (articleId: string) => Promise<
           { ok: true } | { ok: false; error?: 'invalid_id' | 'article_not_found' | 'database_error' }
         >
@@ -195,9 +249,22 @@ declare global {
         getClickThrough: () => Promise<boolean>
         toggleClickThrough: () => Promise<boolean>
         setOpacity: (opacity: number) => void
+        getInteractionMode: () => Promise<'game' | 'interactive'>
+        setInteractionMode: (mode: 'game' | 'interactive') => Promise<boolean>
         onPinsUpdated: (cb: () => void) => () => void
         onFocusSearch: (cb: () => void) => () => void
         onClickThroughChanged: (cb: (enabled: boolean) => void) => () => void
+        onApplyUiPrefs: (
+          cb: (prefs: {
+            opacity?: number
+            layoutPreset?: 'compact' | 'reading' | 'full'
+            focusMode?: boolean
+            fontScale?: number
+            toolsExpanded?: boolean
+            cheatSheetMode?: boolean
+            articleListMode?: 'cards' | 'dense'
+          }) => void
+        ) => () => void
       }
       toolOverlay: {
         show: (which: 'cheats' | 'collections') => Promise<void>
@@ -207,7 +274,23 @@ declare global {
         dock: (which: 'cheats' | 'collections', where: 'left' | 'right' | 'top-right' | 'center') => Promise<void>
       }
       ai: {
-        complete: (payload: AiCompletePayload) => Promise<{ text: string; citations: AiCitation[] }>
+        complete: (payload: AiCompletePayload) => Promise<AiCompleteResult>
+        chatTurn: (payload: AiChatTurnPayload) => Promise<AiCompleteResult>
+        embeddings: {
+          status: (cfg: AiProviderConfig) => Promise<AiEmbeddingsStatus>
+          rebuild: (cfg: AiProviderConfig) => Promise<AiEmbeddingsProgress>
+          cancel: () => Promise<boolean>
+          clear: () => Promise<boolean>
+          onProgress: (cb: (p: AiEmbeddingsProgress) => void) => () => void
+        }
+      }
+      aiChat: {
+        list: () => Promise<AiConversationSummary[]>
+        create: (payload: AiChatCreatePayload) => Promise<{ id: string }>
+        get: (id: string) => Promise<AiChatGetResult | null>
+        delete: (id: string) => Promise<boolean>
+        rename: (payload: { id: string; title: string }) => Promise<boolean>
+        appendTurn: (payload: AiChatAppendTurnPayload) => Promise<void>
       }
       aiAgents: {
         list: () => Promise<AiAgentRecord[]>
@@ -224,15 +307,10 @@ declare global {
       shell: { openExternal: (url: string) => void }
       seed: { run: () => Promise<boolean> }
       collections: {
-        list: () => Promise<unknown[]>
-        save: (row: {
-          id?: string
-          name: string
-          description?: string | null
-          sort_order?: number
-        }) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
+        list: () => Promise<ArticleCollectionRecord[]>
+        save: (row: ArticleCollectionSavePayload) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
         delete: (id: string) => Promise<boolean>
-        getArticles: (collectionId: string) => Promise<unknown[]>
+        getArticles: (collectionId: string) => Promise<CollectionArticleRecord[]>
         addArticle: (
           collectionId: string,
           articleId: string
@@ -256,18 +334,14 @@ declare global {
       }
       reader: {
         pushRecent: (articleId: string) => Promise<boolean>
-        listRecent: (limit?: number) => Promise<unknown[]>
+        listRecent: (limit?: number) => Promise<BookmarkArticleRecord[]>
       }
       cheatSheets: {
-        list: () => Promise<unknown[]>
-        get: (id: string) => Promise<unknown>
-        save: (row: {
-          id?: string
-          title: string
-          body: string
-          sort_order?: number
-        }) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
+        list: () => Promise<CheatSheetRecord[]>
+        get: (id: string) => Promise<CheatSheetRecord | null>
+        save: (row: CheatSheetSavePayload) => Promise<{ ok: true; id: string } | { ok: false; error: string }>
         delete: (id: string) => Promise<boolean>
+        onChanged: (cb: () => void) => () => void
       }
     }
   }

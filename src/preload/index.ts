@@ -4,11 +4,26 @@ import type {
   ReplaceDocumentImportPayload,
   AiProviderConfig,
   AiCompletePayload,
+  AiCompleteResult,
+  AiChatTurnPayload,
+  AiChatCreatePayload,
+  AiChatAppendTurnPayload,
+  AiConversationSummary,
+  AiChatGetResult,
   AiAgentRecord,
-  AiCitation,
+  AiEmbeddingsProgress,
+  AiEmbeddingsStatus,
   BrowserImportPayload,
   ManualDomParseRulesV1,
-  ArticleUpdatePayload
+  ArticleUpdatePayload,
+  ArticleCollectionRecord,
+  ArticleCollectionSavePayload,
+  BookmarkArticleRecord,
+  CheatSheetRecord,
+  CheatSheetSavePayload,
+  CollectionArticleRecord,
+  UserNoteRecord,
+  UserNoteSavePayload
 } from '../shared/types'
 
 const api = {
@@ -86,6 +101,13 @@ const api = {
         cheatsOverlay: string
         collectionsOverlay: string
       }
+      registration: {
+        toggle: boolean
+        search: boolean
+        clickThrough: boolean
+        cheatsOverlay: boolean
+        collectionsOverlay: boolean
+      }
     }> => ipcRenderer.invoke('hotkeys:get'),
     set: (
       partial: Partial<{
@@ -102,20 +124,19 @@ const api = {
     resetDefaults: (): Promise<{ ok: true }> => ipcRenderer.invoke('hotkeys:reset-defaults')
   },
   notes: {
-    list: (): Promise<unknown[]> => ipcRenderer.invoke('notes:list'),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('notes:get', id),
-    save: (payload: {
-      id?: string
-      article_id?: string | null
-      scenario_key?: string | null
-      title?: string | null
-      body: string
-    }): Promise<{ ok: true; id: string } | { ok: false; error: string }> =>
+    list: (): Promise<UserNoteRecord[]> => ipcRenderer.invoke('notes:list'),
+    get: (id: string): Promise<UserNoteRecord | null> => ipcRenderer.invoke('notes:get', id),
+    save: (payload: UserNoteSavePayload): Promise<{ ok: true; id: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke('notes:save', payload),
-    delete: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('notes:delete', id)
+    delete: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('notes:delete', id),
+    onChanged: (cb: () => void): (() => void) => {
+      const handler = (): void => cb()
+      ipcRenderer.on('notes:changed', handler)
+      return () => ipcRenderer.removeListener('notes:changed', handler)
+    }
   },
   bookmarks: {
-    list: (): Promise<unknown[]> => ipcRenderer.invoke('bookmarks:list'),
+    list: (): Promise<BookmarkArticleRecord[]> => ipcRenderer.invoke('bookmarks:list'),
     has: (articleId: string): Promise<boolean> => ipcRenderer.invoke('bookmarks:has', articleId),
     add: (
       articleId: string
@@ -209,11 +230,42 @@ const api = {
     show: (): Promise<void> => ipcRenderer.invoke('overlay:show'),
     toggle: (): Promise<void> => ipcRenderer.invoke('overlay:toggle'),
     hide: (): Promise<void> => ipcRenderer.invoke('overlay:hide'),
-    dock: (where: 'left' | 'right' | 'top-right' | 'center'): Promise<void> =>
+    dock: (
+      where:
+        | 'left'
+        | 'right'
+        | 'top-right'
+        | 'center'
+        | 'top-left'
+        | 'bottom-left'
+        | 'bottom-right'
+        | 'compact-top-right'
+        | 'wide-right'
+    ): Promise<void> =>
       ipcRenderer.invoke('overlay:dock', where),
     raise: (): Promise<boolean> => ipcRenderer.invoke('overlay:raise'),
+    applyGameProfile: (): Promise<{
+      ok: true
+      opacity: number
+      clickThrough: boolean
+      aotLevel: 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
+      interactionMode: 'game' | 'interactive'
+      dock: 'left' | 'right' | 'top-right' | 'center' | 'top-left' | 'bottom-left' | 'bottom-right' | 'compact-top-right' | 'wide-right'
+      uiPrefs: {
+        opacity?: number
+        layoutPreset?: 'compact' | 'reading' | 'full'
+        focusMode?: boolean
+        fontScale?: number
+        toolsExpanded?: boolean
+        cheatSheetMode?: boolean
+        articleListMode?: 'cards' | 'dense'
+      }
+    }> => ipcRenderer.invoke('overlay:apply-game-profile'),
     setAlwaysOnTopLevel: (level: 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'): Promise<boolean> =>
       ipcRenderer.invoke('overlay:set-always-on-top-level', level),
+    getInteractionMode: (): Promise<'game' | 'interactive'> => ipcRenderer.invoke('overlay:get-interaction-mode'),
+    setInteractionMode: (mode: 'game' | 'interactive'): Promise<boolean> =>
+      ipcRenderer.invoke('overlay:set-interaction-mode', mode),
     pin: (articleId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('overlay:pin-article', articleId),
     unpin: (articleId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('overlay:unpin-article', articleId),
     reorderPins: (orderedArticleIds: string[]): Promise<boolean> =>
@@ -237,6 +289,32 @@ const api = {
       const handler = (_: unknown, enabled: boolean): void => cb(enabled)
       ipcRenderer.on('overlay:click-through-changed', handler)
       return () => ipcRenderer.removeListener('overlay:click-through-changed', handler)
+    },
+    onApplyUiPrefs: (
+      cb: (prefs: {
+        opacity?: number
+        layoutPreset?: 'compact' | 'reading' | 'full'
+        focusMode?: boolean
+        fontScale?: number
+        toolsExpanded?: boolean
+        cheatSheetMode?: boolean
+        articleListMode?: 'cards' | 'dense'
+      }) => void
+    ): (() => void) => {
+      const handler = (
+        _: unknown,
+        prefs: {
+          opacity?: number
+          layoutPreset?: 'compact' | 'reading' | 'full'
+          focusMode?: boolean
+          fontScale?: number
+          toolsExpanded?: boolean
+          cheatSheetMode?: boolean
+          articleListMode?: 'cards' | 'dense'
+        }
+      ): void => cb(prefs)
+      ipcRenderer.on('overlay:apply-ui-prefs', handler)
+      return () => ipcRenderer.removeListener('overlay:apply-ui-prefs', handler)
     }
   },
   toolOverlay: {
@@ -248,8 +326,32 @@ const api = {
       ipcRenderer.invoke('toolOverlay:dock', which, where)
   },
   ai: {
-    complete: (payload: AiCompletePayload): Promise<{ text: string; citations: AiCitation[] }> =>
-      ipcRenderer.invoke('ai:complete', payload)
+    complete: (payload: AiCompletePayload): Promise<AiCompleteResult> =>
+      ipcRenderer.invoke('ai:complete', payload),
+    chatTurn: (payload: AiChatTurnPayload): Promise<AiCompleteResult> =>
+      ipcRenderer.invoke('ai:chatTurn', payload),
+    embeddings: {
+      status: (cfg: AiProviderConfig): Promise<AiEmbeddingsStatus> =>
+        ipcRenderer.invoke('ai:embeddings:status', cfg),
+      rebuild: (cfg: AiProviderConfig): Promise<AiEmbeddingsProgress> =>
+        ipcRenderer.invoke('ai:embeddings:rebuild', cfg),
+      cancel: (): Promise<boolean> => ipcRenderer.invoke('ai:embeddings:cancel'),
+      clear: (): Promise<boolean> => ipcRenderer.invoke('ai:embeddings:clear'),
+      onProgress: (cb: (p: AiEmbeddingsProgress) => void): (() => void) => {
+        const handler = (_: unknown, p: AiEmbeddingsProgress): void => cb(p)
+        ipcRenderer.on('ai:embeddings:progress', handler)
+        return () => ipcRenderer.removeListener('ai:embeddings:progress', handler)
+      }
+    }
+  },
+  aiChat: {
+    list: (): Promise<AiConversationSummary[]> => ipcRenderer.invoke('aiChat:list'),
+    create: (payload: AiChatCreatePayload): Promise<{ id: string }> => ipcRenderer.invoke('aiChat:create', payload),
+    get: (id: string): Promise<AiChatGetResult | null> => ipcRenderer.invoke('aiChat:get', id),
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('aiChat:delete', id),
+    rename: (payload: { id: string; title: string }): Promise<boolean> =>
+      ipcRenderer.invoke('aiChat:rename', payload),
+    appendTurn: (payload: AiChatAppendTurnPayload): Promise<void> => ipcRenderer.invoke('aiChat:appendTurn', payload)
   },
   aiAgents: {
     list: (): Promise<AiAgentRecord[]> => ipcRenderer.invoke('aiAgents:list'),
@@ -271,16 +373,11 @@ const api = {
     run: (): Promise<boolean> => ipcRenderer.invoke('seed:run')
   },
   collections: {
-    list: (): Promise<unknown[]> => ipcRenderer.invoke('collections:list'),
-    save: (row: {
-      id?: string
-      name: string
-      description?: string | null
-      sort_order?: number
-    }): Promise<{ ok: true; id: string } | { ok: false; error: string }> =>
+    list: (): Promise<ArticleCollectionRecord[]> => ipcRenderer.invoke('collections:list'),
+    save: (row: ArticleCollectionSavePayload): Promise<{ ok: true; id: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke('collections:save', row),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('collections:delete', id),
-    getArticles: (collectionId: string): Promise<unknown[]> =>
+    getArticles: (collectionId: string): Promise<CollectionArticleRecord[]> =>
       ipcRenderer.invoke('collections:getArticles', collectionId),
     addArticle: (
       collectionId: string,
@@ -316,19 +413,19 @@ const api = {
   },
   reader: {
     pushRecent: (articleId: string): Promise<boolean> => ipcRenderer.invoke('reader:pushRecent', articleId),
-    listRecent: (limit?: number): Promise<unknown[]> => ipcRenderer.invoke('reader:listRecent', limit)
+    listRecent: (limit?: number): Promise<BookmarkArticleRecord[]> => ipcRenderer.invoke('reader:listRecent', limit)
   },
   cheatSheets: {
-    list: (): Promise<unknown[]> => ipcRenderer.invoke('cheatSheets:list'),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('cheatSheets:get', id),
-    save: (row: {
-      id?: string
-      title: string
-      body: string
-      sort_order?: number
-    }): Promise<{ ok: true; id: string } | { ok: false; error: string }> =>
+    list: (): Promise<CheatSheetRecord[]> => ipcRenderer.invoke('cheatSheets:list'),
+    get: (id: string): Promise<CheatSheetRecord | null> => ipcRenderer.invoke('cheatSheets:get', id),
+    save: (row: CheatSheetSavePayload): Promise<{ ok: true; id: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke('cheatSheets:save', row),
-    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('cheatSheets:delete', id)
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('cheatSheets:delete', id),
+    onChanged: (cb: () => void): (() => void) => {
+      const handler = (): void => cb()
+      ipcRenderer.on('cheatSheets:changed', handler)
+      return () => ipcRenderer.removeListener('cheatSheets:changed', handler)
+    }
   }
 }
 

@@ -12,6 +12,7 @@ const BOUNDS_KEY = 'overlay_bounds'
 const OVERLAY_AOT_KEY = 'overlay_always_on_top_level'
 const OVERLAY_OPACITY_KEY = 'overlay_opacity'
 const OVERLAY_CLICK_THROUGH_KEY = 'overlay_click_through'
+const OVERLAY_INTERACTION_MODE_KEY = 'overlay_interaction_mode'
 const DEFAULT_WIDTH_RATIO = 0.36
 
 function olog(...args: unknown[]): void {
@@ -43,6 +44,18 @@ function overlayRevealNoFocus(): boolean {
 }
 
 type OverlayAotLevel = 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
+export type OverlayInteractionMode = 'game' | 'interactive'
+export type OverlayDockPosition =
+  | 'left'
+  | 'right'
+  | 'top-right'
+  | 'center'
+  | 'top-left'
+  | 'bottom-left'
+  | 'bottom-right'
+  | 'compact-top-right'
+  | 'wide-right'
+type RevealOptions = { forceFocus?: boolean }
 
 function readOverlayAotLevel(db: Database): OverlayAotLevel {
   const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_AOT_KEY) as
@@ -52,6 +65,15 @@ function readOverlayAotLevel(db: Database): OverlayAotLevel {
   if (v === 'off' || v === 'floating' || v === 'screen-saver' || v === 'pop-up-menu') return v
   /** По умолчанию — максимально возможный уровень под игры/полноэкранные окна (не помогает при exclusive fullscreen DirectX). */
   return 'pop-up-menu'
+}
+
+function readOverlayInteractionMode(db: Database): OverlayInteractionMode {
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_INTERACTION_MODE_KEY) as
+    | { value: string }
+    | undefined
+  const v = row?.value?.trim()
+  if (v === 'interactive' || v === 'game') return v
+  return 'game'
 }
 
 type Bounds = { x: number; y: number; width: number; height: number }
@@ -99,6 +121,10 @@ export class OverlayController {
     return this.clickThrough
   }
 
+  getInteractionMode(): OverlayInteractionMode {
+    return readOverlayInteractionMode(this.getDb())
+  }
+
   private schedulePersistBounds(): void {
     const w = this.win
     if (!w || w.isDestroyed()) return
@@ -120,10 +146,10 @@ export class OverlayController {
     }
 
     olog('ensure: creating BrowserWindow')
-    const { width: sw, height: sh, x: sx, y: sy } = screen.getPrimaryDisplay().workArea
     const db = this.getDb()
     this.alwaysOnTopLevel = readOverlayAotLevel(db)
     const saved = readBounds(db)
+    const { width: sw, height: sh, x: sx, y: sy } = workAreaForInitialBounds(saved)
 
     const defaultW = Math.min(440, Math.floor(sw * DEFAULT_WIDTH_RATIO))
     const defaultH = Math.min(680, Math.floor(sh * 0.78))
@@ -161,6 +187,12 @@ export class OverlayController {
         partition: 'persist:lexpatrol-overlay'
       }
     })
+
+    try {
+      this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    } catch {
+      /* best-effort: Windows may ignore this, but macOS/Linux benefit from it */
+    }
 
     olog('window created', {
       bounds,
@@ -248,9 +280,9 @@ export class OverlayController {
     }
   }
 
-  dock(where: 'left' | 'right' | 'top-right' | 'center'): void {
+  dock(where: OverlayDockPosition): void {
     const w = this.ensure()
-    const { width: sw, height: sh, x: sx, y: sy } = screen.getPrimaryDisplay().workArea
+    const { width: sw, height: sh, x: sx, y: sy } = screen.getDisplayMatching(w.getBounds()).workArea
     const cur = w.getBounds()
     const margin = 10
     switch (where) {
@@ -265,6 +297,24 @@ export class OverlayController {
           height: sh - margin * 2
         })
         break
+      case 'wide-right': {
+        const width = Math.min(Math.max(cur.width, 520), Math.floor(sw * 0.42))
+        w.setBounds({
+          x: sx + sw - width - margin,
+          y: sy + margin,
+          width,
+          height: sh - margin * 2
+        })
+        break
+      }
+      case 'top-left':
+        w.setBounds({
+          x: sx + margin,
+          y: sy + margin,
+          width: Math.min(cur.width, 480),
+          height: Math.min(cur.height, Math.floor(sh * 0.85))
+        })
+        break
       case 'top-right':
         w.setBounds({
           x: sx + sw - cur.width - margin,
@@ -273,6 +323,24 @@ export class OverlayController {
           height: Math.min(cur.height, Math.floor(sh * 0.85))
         })
         break
+      case 'bottom-left': {
+        const width = Math.min(cur.width, 460)
+        const height = Math.min(cur.height, Math.floor(sh * 0.72))
+        w.setBounds({ x: sx + margin, y: sy + sh - height - margin, width, height })
+        break
+      }
+      case 'bottom-right': {
+        const width = Math.min(cur.width, 460)
+        const height = Math.min(cur.height, Math.floor(sh * 0.72))
+        w.setBounds({ x: sx + sw - width - margin, y: sy + sh - height - margin, width, height })
+        break
+      }
+      case 'compact-top-right': {
+        const width = Math.min(360, Math.max(320, Math.floor(sw * 0.28)))
+        const height = Math.min(520, Math.max(360, Math.floor(sh * 0.56)))
+        w.setBounds({ x: sx + sw - width - margin, y: sy + margin, width, height })
+        break
+      }
       default:
         w.setBounds({
           x: sx + Math.floor((sw - cur.width) / 2),
@@ -285,16 +353,16 @@ export class OverlayController {
   }
 
   /** Показать поверх других окон без кражи фокуса из игры (по возможности). */
-  show(): void {
+  show(options?: RevealOptions): void {
     olog('show() called')
-    this.reveal(this.ensure())
+    this.reveal(this.ensure(), options)
   }
 
-  toggle(): void {
+  toggle(options?: RevealOptions): void {
     const w = this.ensure()
     olog('toggle()', { visible: w.isVisible() })
     if (w.isVisible()) w.hide()
-    else this.reveal(w)
+    else this.reveal(w, options)
   }
 
   /** Поднять Z-order (удобно, если окно ушло под игру). */
@@ -306,7 +374,7 @@ export class OverlayController {
   }
 
   /** Прозрачное окно до первого кадра = полностью невидимо; ждём отрисовки. */
-  private reveal(w: BrowserWindow): void {
+  private reveal(w: BrowserWindow, options?: RevealOptions): void {
     if (w.isDestroyed()) return
     const wc = w.webContents
     const loading = wc.isLoading()
@@ -324,9 +392,9 @@ export class OverlayController {
       olog('reveal: showing window, reason:', reason, {
         bounds: w.getBounds(),
         visibleBefore: w.isVisible(),
-        noFocus: overlayRevealNoFocus()
+        noFocus: this.shouldRevealWithoutFocus(options)
       })
-      if (overlayRevealNoFocus()) {
+      if (this.shouldRevealWithoutFocus(options)) {
         w.showInactive()
       } else {
         w.show()
@@ -367,6 +435,18 @@ export class OverlayController {
     this.alwaysOnTopLevel = readOverlayAotLevel(this.getDb())
     this.applyAlwaysOnTopToWindow(w)
     w.moveTop()
+    this.reinforceTopZOrder(w)
+  }
+
+  private reinforceTopZOrder(w: BrowserWindow): void {
+    if (this.alwaysOnTopLevel === 'off') return
+    const reapply = (): void => {
+      if (w.isDestroyed() || !w.isVisible()) return
+      this.applyAlwaysOnTopToWindow(w)
+      w.moveTop()
+    }
+    setTimeout(reapply, 80)
+    setTimeout(reapply, 320)
   }
 
   /** Уровень «поверх окон» для оверлея (см. Electron `setAlwaysOnTop` second arg). */
@@ -379,6 +459,20 @@ export class OverlayController {
     )
     const w = this.win
     if (w && !w.isDestroyed()) this.applyAlwaysOnTopToWindow(w)
+  }
+
+  setInteractionMode(mode: OverlayInteractionMode): void {
+    const db = this.getDb()
+    db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
+      OVERLAY_INTERACTION_MODE_KEY,
+      mode
+    )
+  }
+
+  private shouldRevealWithoutFocus(options?: RevealOptions): boolean {
+    if (overlayRevealNoFocus()) return true
+    if (options?.forceFocus === true) return false
+    return this.getInteractionMode() === 'game'
   }
 
   private applyAlwaysOnTopToWindow(w: BrowserWindow): void {
@@ -462,4 +556,12 @@ function clampRectToWorkArea(
   x = Math.min(Math.max(x, work.x), work.x + work.width - width - 8)
   y = Math.min(Math.max(y, work.y), work.y + work.height - height - 8)
   return { x, y, width, height }
+}
+
+function workAreaForInitialBounds(saved: Bounds | null): Bounds {
+  if (saved) {
+    return screen.getDisplayMatching(saved).workArea
+  }
+  const cursor = screen.getCursorScreenPoint()
+  return screen.getDisplayNearestPoint(cursor).workArea
 }

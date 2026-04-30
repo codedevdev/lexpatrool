@@ -3,6 +3,8 @@ import { LEX_COMMUNITY_DISCORD_URL, LEX_GITHUB_ISSUES_URL } from '../../lib/app-
 import { humanizeAcceleratorForUi, keyboardEventToAccelerator } from '../../lib/hotkey-format'
 
 type HotkeyField = 'toggle' | 'search' | 'clickThrough' | 'cheatsOverlay' | 'collectionsOverlay'
+type OverlayInteractionMode = 'game' | 'interactive'
+type OverlayAotLevel = 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
 
 const UPDATE_NOTIFY_KEY = 'update_notify_startup'
 
@@ -21,10 +23,10 @@ export function SettingsPage(): JSX.Element {
   const [opacity, setOpacity] = useState(0.92)
   const [clickThrough, setClickThrough] = useState(false)
   const [mainAlwaysOnTop, setMainAlwaysOnTop] = useState(false)
-  const [overlayAotLevel, setOverlayAotLevel] = useState<'off' | 'floating' | 'screen-saver' | 'pop-up-menu'>(
-    'pop-up-menu'
-  )
+  const [overlayInteractionMode, setOverlayInteractionMode] = useState<OverlayInteractionMode>('game')
+  const [overlayAotLevel, setOverlayAotLevel] = useState<OverlayAotLevel>('pop-up-menu')
   const [prefsReady, setPrefsReady] = useState(false)
+  const [overlayProfileBusy, setOverlayProfileBusy] = useState(false)
   const [hkDisplay, setHkDisplay] = useState({
     toggle: 'Ctrl+Shift+Space',
     search: 'Ctrl+Shift+F',
@@ -33,6 +35,13 @@ export function SettingsPage(): JSX.Element {
     collectionsOverlay: 'Ctrl+Shift+U'
   })
   const [hkDefaultsDisplay, setHkDefaultsDisplay] = useState({ ...hkDisplay })
+  const [hkRegistration, setHkRegistration] = useState<Record<HotkeyField, boolean>>({
+    toggle: true,
+    search: true,
+    clickThrough: true,
+    cheatsOverlay: true,
+    collectionsOverlay: true
+  })
   const [hkRecording, setHkRecording] = useState<HotkeyField | null>(null)
   const [hkRecordingPreview, setHkRecordingPreview] = useState<string | null>(null)
   const [appVersion, setAppVersion] = useState('')
@@ -57,6 +66,7 @@ export function SettingsPage(): JSX.Element {
       .then((h) => {
         setHkDisplay(h.display)
         setHkDefaultsDisplay(h.defaultsDisplay)
+        setHkRegistration(h.registration)
       })
       .catch(() => {})
   }, [])
@@ -82,6 +92,7 @@ export function SettingsPage(): JSX.Element {
           void window.lawHelper.hotkeys.get().then((h) => {
             setHkDisplay(h.display)
             setHkDefaultsDisplay(h.defaultsDisplay)
+            setHkRegistration(h.registration)
           })
         } else if (r.error === 'duplicate') {
           alert('Такое сочетание уже назначено другому действию.')
@@ -97,11 +108,12 @@ export function SettingsPage(): JSX.Element {
 
   useEffect(() => {
     void (async () => {
-      const [op, ct, main, oaot] = await Promise.all([
+      const [op, ct, main, oaot, interactionMode] = await Promise.all([
         window.lawHelper.settings.get('overlay_opacity'),
         window.lawHelper.settings.get('overlay_click_through'),
         window.lawHelper.settings.get('main_window_always_on_top'),
-        window.lawHelper.settings.get('overlay_always_on_top_level')
+        window.lawHelper.settings.get('overlay_always_on_top_level'),
+        window.lawHelper.overlay.getInteractionMode()
       ])
       if (op) {
         const n = Number(op)
@@ -112,6 +124,7 @@ export function SettingsPage(): JSX.Element {
       if (oaot === 'off' || oaot === 'floating' || oaot === 'screen-saver' || oaot === 'pop-up-menu') {
         setOverlayAotLevel(oaot)
       }
+      setOverlayInteractionMode(interactionMode)
       setPrefsReady(true)
     })()
   }, [])
@@ -135,6 +148,26 @@ export function SettingsPage(): JSX.Element {
     if (!prefsReady) return
     void window.lawHelper.overlay.setAlwaysOnTopLevel(overlayAotLevel)
   }, [overlayAotLevel, prefsReady])
+
+  useEffect(() => {
+    if (!prefsReady) return
+    void window.lawHelper.overlay.setInteractionMode(overlayInteractionMode)
+  }, [overlayInteractionMode, prefsReady])
+
+  const failedHotkeys = (Object.keys(hkRegistration) as HotkeyField[]).filter((id) => !hkRegistration[id])
+
+  async function applyGameOverlayProfile(): Promise<void> {
+    setOverlayProfileBusy(true)
+    try {
+      const r = await window.lawHelper.overlay.applyGameProfile()
+      setOpacity(r.opacity)
+      setClickThrough(r.clickThrough)
+      setOverlayAotLevel(r.aotLevel)
+      setOverlayInteractionMode(r.interactionMode)
+    } finally {
+      setOverlayProfileBusy(false)
+    }
+  }
 
   async function backup(): Promise<void> {
     const r = await window.lawHelper.backup.save()
@@ -352,6 +385,7 @@ export function SettingsPage(): JSX.Element {
                 void window.lawHelper.hotkeys.get().then((h) => {
                   setHkDisplay(h.display)
                   setHkDefaultsDisplay(h.defaultsDisplay)
+                  setHkRegistration(h.registration)
                 })
               })
             }}
@@ -440,6 +474,17 @@ export function SettingsPage(): JSX.Element {
             </tbody>
           </table>
         </div>
+        {failedHotkeys.length > 0 ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs leading-relaxed text-amber-100">
+            <p className="font-medium text-white">Некоторые горячие клавиши не зарегистрировались.</p>
+            <p className="mt-1">
+              Проверьте сочетания: {failedHotkeys.map((id) => HOTKEY_ROW_META[id].title).join(', ')}. Обычно причина —
+              клавиша уже занята системой, игрой или другой программой.
+            </p>
+          </div>
+        ) : (
+          <p className="text-[11px] text-app-muted">Все горячие клавиши успешно зарегистрированы системой.</p>
+        )}
       </section>
 
       <section className="glass space-y-5 rounded-2xl p-6">
@@ -448,6 +493,38 @@ export function SettingsPage(): JSX.Element {
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-app-muted">
             Главное окно LexPatrol, оверлей закрепов и отдельные окна шпаргалок / подборок — разные окна. Ниже — что относится к
             оверлею закрепов и главному окну. Горячие клавиши для шпаргалок и подборок задаются в таблице выше.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-accent/20 bg-accent/10 px-4 py-3 text-xs leading-relaxed text-app-muted">
+          <p className="font-medium text-white">Рекомендация для игры</p>
+          <p className="mt-1">
+            Для GTA/RP лучше использовать оконный или безрамочный полноэкранный режим. В exclusive fullscreen Windows может не
+            показывать сторонние Electron-окна поверх игры, даже если выбран максимальный уровень «поверх окон».
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="max-w-2xl">
+              <h3 className="text-sm font-semibold text-white">Игровой профиль оверлея</h3>
+              <p className="mt-1 text-xs leading-relaxed text-app-muted">
+                Быстрая настройка под Discord-like сценарий: компактный вид справа сверху, максимальный уровень поверх окон,
+                показ без фокуса, полупрозрачность 90% и режим «мышь в игру».
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={overlayProfileBusy}
+              onClick={() => void applyGameOverlayProfile()}
+              className="rounded-lg border border-emerald-300/35 bg-emerald-400/15 px-4 py-2 text-sm font-medium text-emerald-50 hover:bg-emerald-400/25 disabled:cursor-wait disabled:opacity-60"
+            >
+              {overlayProfileBusy ? 'Применяем…' : 'Применить игровой профиль'}
+            </button>
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-emerald-50/75">
+            Если игра запущена в exclusive fullscreen и окно всё равно не видно, переключите игру в borderless/windowed и нажмите
+            горячую клавишу показа оверлея ещё раз.
           </p>
         </div>
 
@@ -488,9 +565,7 @@ export function SettingsPage(): JSX.Element {
             </span>
             <select
               value={overlayAotLevel}
-              onChange={(e) =>
-                setOverlayAotLevel(e.target.value as 'off' | 'floating' | 'screen-saver' | 'pop-up-menu')
-              }
+              onChange={(e) => setOverlayAotLevel(e.target.value as OverlayAotLevel)}
               className="mt-1 w-full max-w-md rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-accent/50"
             >
               <option value="off">Выкл. (как обычное окно)</option>
@@ -499,6 +574,42 @@ export function SettingsPage(): JSX.Element {
               <option value="pop-up-menu">Максимально (pop-up-menu)</option>
             </select>
           </label>
+
+          <div className="space-y-2">
+            <div>
+              <span className="text-xs font-medium text-white/90">Режим взаимодействия с игрой</span>
+              <p className="mt-1 text-[11px] leading-relaxed text-app-muted/95">
+                Игровой режим показывает оверлей без захвата фокуса, чтобы игра не паузилась и не сворачивалась. Поиск по базе
+                всё равно открывает оверлей интерактивно, когда нужен ввод текста.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setOverlayInteractionMode('game')}
+                className={`rounded-xl border px-3 py-3 text-left text-sm transition ${
+                  overlayInteractionMode === 'game'
+                    ? 'border-accent/45 bg-accent/15 text-white'
+                    : 'border-white/10 bg-black/20 text-app-muted hover:border-white/20 hover:text-white'
+                }`}
+              >
+                <span className="font-medium">Игровой</span>
+                <span className="mt-1 block text-xs opacity-85">Показ без фокуса: лучше для fullscreen/borderless.</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOverlayInteractionMode('interactive')}
+                className={`rounded-xl border px-3 py-3 text-left text-sm transition ${
+                  overlayInteractionMode === 'interactive'
+                    ? 'border-accent/45 bg-accent/15 text-white'
+                    : 'border-white/10 bg-black/20 text-app-muted hover:border-white/20 hover:text-white'
+                }`}
+              >
+                <span className="font-medium">Интерактивный</span>
+                <span className="mt-1 block text-xs opacity-85">Оверлей сразу получает клавиатуру и работает как окно.</span>
+              </button>
+            </div>
+          </div>
 
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -528,7 +639,8 @@ export function SettingsPage(): JSX.Element {
               <span className="font-medium text-white">Пропускать клики сквозь оверлей в игру</span>
               <span className="mt-1 block text-xs leading-relaxed opacity-90">
                 Когда включено, клики проходят в игру; на панели оверлея тот же режим переключается кнопкой или горячей клавишей{' '}
-                <span className="font-mono text-white/80">{hkDisplay.clickThrough}</span>.
+                <span className="font-mono text-white/80">{hkDisplay.clickThrough}</span>. Сам оверлей в этом режиме нельзя
+                нажимать, пока не переключите мышь обратно в оверлей.
               </span>
             </span>
           </label>

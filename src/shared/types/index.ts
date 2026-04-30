@@ -79,6 +79,83 @@ export interface SearchHit {
   rank: number
 }
 
+export interface CheatSheetRecord {
+  id: string
+  title: string
+  body: string
+  sort_order: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CheatSheetSavePayload {
+  id?: string
+  title: string
+  body: string
+  sort_order?: number
+}
+
+export interface ArticleCollectionRecord {
+  id: string
+  name: string
+  description: string | null
+  sort_order: number
+  created_at?: string
+  article_count?: number
+}
+
+export interface ArticleCollectionSavePayload {
+  id?: string
+  name: string
+  description?: string | null
+  sort_order?: number
+}
+
+export interface CollectionArticleRecord {
+  id: string
+  heading: string
+  article_number: string | null
+  body_clean?: string
+  summary_short?: string | null
+  penalty_hint?: string | null
+  display_meta_json?: string | null
+  document_id: string
+  document_title: string
+  document_article_import_filter?: string | null
+  sort_order?: number
+}
+
+export interface BookmarkArticleRecord {
+  id: string
+  article_id: string
+  created_at: string
+  heading: string
+  article_number: string | null
+  document_id: string
+  document_title: string
+}
+
+export interface UserNoteRecord {
+  id: string
+  article_id: string | null
+  scenario_key: string | null
+  title: string | null
+  body: string
+  updated_at: string
+  article_heading: string | null
+  article_number: string | null
+  document_id: string | null
+  document_title: string | null
+}
+
+export interface UserNoteSavePayload {
+  id?: string
+  article_id?: string | null
+  scenario_key?: string | null
+  title?: string | null
+  body: string
+}
+
 export interface AiProviderConfig {
   provider: 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'openai_compatible'
   baseUrl?: string
@@ -87,6 +164,39 @@ export interface AiProviderConfig {
   temperature: number
   maxTokens: number
   allowBroaderContext?: boolean
+  /**
+   * Доп. этапы конвейера ИИ. По умолчанию включены — выключаются при слабых reasoning-моделях,
+   * которые плохо возвращают JSON для planner / rerank.
+   */
+  pipeline?: {
+    /** LLM переписывает вопрос пользователя в поисковую форму с учётом RP-сленга и аббревиатур кодексов. */
+    plannerEnabled?: boolean
+    /** LLM выбирает 8-12 наиболее релевантных фрагментов из 30 кандидатов гибридного retrieval. */
+    rerankEnabled?: boolean
+    /** Системный промпт «квалификация → норма → санкция → процесс» под ситуационные вопросы. */
+    situationalPrompt?: boolean
+  }
+  /**
+   * Семантический поиск по статьям через embeddings. Хранятся локально в SQLite, считаются по запросу
+   * пользователя («Перестроить индекс»). Не нужно для базовой работы — гибрид FTS+эмбеддинги дороже,
+   * но даёт «по смыслу».
+   */
+  embeddings?: AiEmbeddingsConfig
+}
+
+export interface AiEmbeddingsConfig {
+  enabled: boolean
+  /** Если undefined — наследуется от основного провайдера (provider/baseUrl/apiKey). */
+  inheritFromMain?: boolean
+  provider?: 'openai' | 'openai_compatible' | 'ollama' | 'gemini'
+  baseUrl?: string
+  apiKey?: string
+  /** Имя модели embeddings (text-embedding-3-small, nomic-embed-text, …) */
+  model: string
+  /** Размерность последнего успешно построенного индекса (для проверки совместимости). */
+  lastBuiltDim?: number | null
+  lastBuiltModel?: string | null
+  lastBuiltAt?: string | null
 }
 
 /**
@@ -115,12 +225,165 @@ export interface AiCompletePayload {
   agentId?: string | null
 }
 
+/** Предыдущие реплики диалога без текущего сообщения пользователя (только user | assistant). */
+export interface AiChatHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AiChatTurnPayload {
+  cfg: AiProviderConfig
+  agentId?: string | null
+  history: AiChatHistoryMessage[]
+  message: string
+  /**
+   * Принудительно подцепить эти статьи в контекст retrieval (например, всё, что уже цитировалось в диалоге).
+   * Источник пометится `chat-pinned` в `AiRetrievalReport`.
+   */
+  pinnedArticleIds?: string[]
+  /** Снять закреп пользователем — id из этого списка не подмешиваются принудительно. */
+  excludePinnedIds?: string[]
+}
+
+/** Источник, по которому статья попала в финальный контекст ИИ. */
+export type AiRetrievalSource =
+  | 'fts'
+  | 'embedding'
+  | 'article-num'
+  | 'chat-pinned'
+  | 'rerank-llm'
+
+/** Описание одной попавшей в контекст статьи (для прозрачности UI «Что нашлось в базе»). */
+export interface AiRetrievalHit {
+  articleId: string
+  documentId: string
+  documentTitle: string
+  articleNumber: string | null
+  heading: string
+  /** Объединённый score после слияния (0..1). */
+  score: number
+  /** Все источники, выдавшие эту статью (FTS и embeddings и т.д.). */
+  sources: AiRetrievalSource[]
+  /** Краткая выдержка для подсказки в UI. */
+  snippet: string | null
+}
+
+/** Дебаг-метаданные конвейера: что планировщик подумал, какие методы сработали. */
+export interface AiPipelineReport {
+  /** Итоговая поисковая фраза (после planner или сырая). */
+  searchQuery: string
+  /** Что использовал planner (если включён): ключевые темы, кодексы, номера. */
+  plannerKeywords?: string[]
+  plannerArticleNumbers?: string[]
+  plannerCodexHints?: string[]
+  /** lookup — пользователь спрашивает про конкретную статью; situational — сценарий «что будет за X». */
+  intent?: 'lookup' | 'situational' | 'general'
+  /** Какие стадии реально отработали. */
+  stages: {
+    planner: 'on' | 'off' | 'failed'
+    embeddings: 'on' | 'off' | 'unavailable' | 'failed'
+    rerank: 'on' | 'off' | 'failed'
+  }
+  /** Сколько кандидатов получили на каждом этапе. */
+  counts: {
+    keyword: number
+    embedding: number
+    pinned: number
+    finalContext: number
+  }
+  /** Корни названий кодексов, по которым пытались отсечь чужие документы (например, ["процессуальн"]). */
+  codexHintsApplied?: string[]
+  /**
+   * true — фильтр кодекса реально сработал (нашлось хоть что-то в нужном кодексе);
+   * false — пользователь назвал кодекс, но в нём не оказалось подходящих статей, и мы откатились на общий список.
+   */
+  codexFilterApplied?: boolean
+  /**
+   * current — корни кодекса и номера статей берутся только из текущего хода (вопрос + подсказки планировщика), без смешения с историей;
+   * conversation — как раньше: в подсказках кодекса участвуют последние user-сообщения.
+   */
+  codexScope?: 'current' | 'conversation'
+}
+
+export interface AiCompleteResult {
+  text: string
+  citations: AiCitation[]
+  notice?: string | null
+  /** Полный список фрагментов, попавших в контекст модели — для панели «Что нашлось в базе». */
+  retrieved?: AiRetrievalHit[]
+  pipeline?: AiPipelineReport
+}
+
+/** Сохранённые диалоги ИИ (таблица ai_conversations). */
+export interface AiConversationSummary {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+  provider: string | null
+  model: string | null
+  agent_id: string | null
+}
+
+/** Сообщение из БД (таблица ai_messages). */
+export interface AiStoredChatMessage {
+  id: string
+  conversation_id: string
+  role: 'user' | 'assistant'
+  content: string
+  citations: AiCitation[] | null
+  created_at: string
+}
+
+export interface AiChatCreatePayload {
+  cfg: AiProviderConfig
+  agentId?: string | null
+  title?: string
+}
+
+export interface AiChatAppendTurnPayload {
+  conversationId: string
+  userContent: string
+  assistantContent: string
+  citations: AiCitation[]
+  agentId?: string | null
+}
+
+export interface AiChatGetResult {
+  conversation: AiConversationSummary
+  messages: AiStoredChatMessage[]
+}
+
 export interface AiCitation {
   articleId: string
   documentId: string
   documentTitle: string
   articleLabel: string
   excerpt: string
+}
+
+/** Состояние семантического индекса: видно во вкладке «Семантический поиск». */
+export interface AiEmbeddingsStatus {
+  totalArticles: number
+  indexedArticles: number
+  dirtyArticles: number
+  /** Несовпадение модели у части статей: переключили embedding-модель — нужно перестроить. */
+  modelMismatch: number
+  currentModel: string | null
+  currentDim: number | null
+  lastBuiltAt: string | null
+  enabled: boolean
+}
+
+/** События прогресса при ai:embeddings:rebuild. */
+export interface AiEmbeddingsProgress {
+  phase: 'starting' | 'embedding' | 'done' | 'cancelled' | 'error'
+  processed: number
+  total: number
+  /** Текущая обрабатываемая статья (для лога). */
+  currentTitle?: string
+  /** Только для phase=error/done. */
+  message?: string
 }
 
 export interface ImportPayload {

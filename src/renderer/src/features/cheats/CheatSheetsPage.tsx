@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-
-type Sheet = { id: string; title: string; body: string; sort_order: number }
+import type { CheatSheetRecord } from '@shared/types'
 
 const TEMPLATES: { label: string; title: string; body: string }[] = [
   {
@@ -17,11 +16,37 @@ const TEMPLATES: { label: string; title: string; body: string }[] = [
     label: 'Смена (чеклист)',
     title: 'Смена — памятка',
     body: '□ Документы\n□ Связь\n□ Координаты\n\nЗаметки:\n'
+  },
+  {
+    label: 'Задержание',
+    title: 'Задержание — порядок',
+    body: 'Основание:\n1. Представиться и назвать причину.\n2. Разъяснить права.\n3. Провести досмотр/изъятие по процедуре.\n4. Зафиксировать время и статью.\n\nФраза:\n'
+  },
+  {
+    label: 'ДТП',
+    title: 'ДТП — быстрый чеклист',
+    body: 'Место:\nУчастники:\nПострадавшие:\nСвидетели:\n\n□ Обезопасить место\n□ Вызвать EMS при необходимости\n□ Проверить документы\n□ Оформить итог\n'
+  },
+  {
+    label: 'Обыск',
+    title: 'Обыск — формулировки',
+    body: 'Причина обыска:\nПонятые/камера:\nИзъято:\n\nШаблон:\nНа основании ... будет проведён обыск. Прошу не препятствовать законным действиям.\n'
+  },
+  {
+    label: 'Рапорт',
+    title: 'Рапорт — шаблон',
+    body: 'Дата/время:\nСотрудник:\nСобытие:\nОснование:\nДействия:\nИтог:\n\nДоказательства:\n'
   }
 ]
 
+function includesQuery(row: CheatSheetRecord, q: string): boolean {
+  const s = q.trim().toLowerCase()
+  if (!s) return true
+  return `${row.title}\n${row.body}`.toLowerCase().includes(s)
+}
+
 export function CheatSheetsPage(): JSX.Element {
-  const [rows, setRows] = useState<Sheet[]>([])
+  const [rows, setRows] = useState<CheatSheetRecord[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
@@ -31,7 +56,7 @@ export function CheatSheetsPage(): JSX.Element {
   const lastSavedRef = useRef<{ title: string; body: string } | null>(null)
 
   const refresh = useCallback(async () => {
-    const list = (await window.lawHelper.cheatSheets.list()) as Sheet[]
+    const list = await window.lawHelper.cheatSheets.list()
     setRows(Array.isArray(list) ? list : [])
   }, [])
 
@@ -45,7 +70,8 @@ export function CheatSheetsPage(): JSX.Element {
     const r = await window.lawHelper.cheatSheets.save({
       id: activeId ?? undefined,
       title: t,
-      body
+      body,
+      sort_order: rows.find((x) => x.id === activeId)?.sort_order
     })
     if (r.ok) {
       setActiveId(r.id)
@@ -57,10 +83,15 @@ export function CheatSheetsPage(): JSX.Element {
     } else {
       setStatus('Не удалось сохранить.')
     }
-  }, [activeId, title, body, refresh])
+  }, [activeId, title, body, rows, refresh])
 
   useEffect(() => {
     void refresh()
+  }, [refresh])
+
+  useEffect(() => {
+    const off = window.lawHelper.cheatSheets.onChanged(() => void refresh())
+    return () => off()
   }, [refresh])
 
   useEffect(() => {
@@ -72,7 +103,7 @@ export function CheatSheetsPage(): JSX.Element {
       return
     }
     void window.lawHelper.cheatSheets.get(activeId).then((r) => {
-      const row = r as Sheet | null
+      const row = r
       if (row) {
         setTitle(row.title)
         setBody(row.body)
@@ -85,7 +116,7 @@ export function CheatSheetsPage(): JSX.Element {
   const filteredRows = useMemo(() => {
     const s = listQ.trim().toLowerCase()
     if (!s) return rows
-    return rows.filter((r) => r.title.toLowerCase().includes(s))
+    return rows.filter((r) => includesQuery(r, s))
   }, [rows, listQ])
 
   useEffect(() => {
@@ -140,6 +171,49 @@ export function CheatSheetsPage(): JSX.Element {
     }
   }
 
+  async function copyBody(): Promise<void> {
+    if (!body.trim()) {
+      setStatus('Нечего копировать.')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(body)
+      setStatus('Текст скопирован.')
+    } catch {
+      setStatus('Не удалось скопировать.')
+    }
+  }
+
+  async function moveSheet(id: string, direction: -1 | 1): Promise<void> {
+    const currentIndex = rows.findIndex((x) => x.id === id)
+    const nextIndex = currentIndex + direction
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= rows.length) return
+    if (dirty && activeId === id && !window.confirm('Сначала сохранить текущие изменения и изменить порядок?')) return
+
+    const current = rows[currentIndex]!
+    const next = rows[nextIndex]!
+    const currentPayload =
+      current.id === activeId
+        ? { id: current.id, title: title.trim() || current.title, body, sort_order: next.sort_order }
+        : { id: current.id, title: current.title, body: current.body, sort_order: next.sort_order }
+    const nextPayload =
+      next.id === activeId
+        ? { id: next.id, title: title.trim() || next.title, body, sort_order: current.sort_order }
+        : { id: next.id, title: next.title, body: next.body, sort_order: current.sort_order }
+
+    const [a, b] = await Promise.all([
+      window.lawHelper.cheatSheets.save(currentPayload),
+      window.lawHelper.cheatSheets.save(nextPayload)
+    ])
+    if (a.ok && b.ok) {
+      if (activeId === id) setDirty(false)
+      setStatus('Порядок обновлён.')
+      void refresh()
+    } else {
+      setStatus('Не удалось изменить порядок.')
+    }
+  }
+
   const bodyStats = useMemo(() => {
     const lines = body.length ? body.split(/\r?\n/).length : 0
     return `${body.length.toLocaleString('ru-RU')} симв. · ${lines} строк`
@@ -166,7 +240,7 @@ export function CheatSheetsPage(): JSX.Element {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(240px,320px)_minmax(0,1fr)]">
         <aside className="glass flex min-h-0 flex-col rounded-2xl p-4 lg:max-h-[min(78vh,40rem)]">
           <button
             type="button"
@@ -177,25 +251,57 @@ export function CheatSheetsPage(): JSX.Element {
           </button>
           <input
             className="mt-3 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/40"
-            placeholder="Поиск в списке…"
+            placeholder="Поиск по названию и тексту…"
             value={listQ}
             onChange={(e) => setListQ(e.target.value)}
           />
           <ul className="mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto lex-app-scroll">
+            {filteredRows.length === 0 ? (
+              <li className="rounded-lg border border-white/5 px-2 py-4 text-center text-xs text-app-muted">
+                Ничего не найдено.
+              </li>
+            ) : null}
             {filteredRows.map((s) => (
               <li key={s.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (dirty && !window.confirm('Есть несохранённые изменения. Переключить шпаргалку?')) return
-                    setActiveId(s.id)
-                  }}
-                  className={`w-full rounded-lg px-2 py-2 text-left text-sm ${
-                    activeId === s.id ? 'bg-white/10 text-white' : 'text-app-muted hover:bg-white/5'
+                <div
+                  className={`group rounded-lg border px-2 py-2 ${
+                    activeId === s.id ? 'border-accent/30 bg-white/10' : 'border-transparent hover:bg-white/5'
                   }`}
                 >
-                  {s.title}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (dirty && !window.confirm('Есть несохранённые изменения. Переключить шпаргалку?')) return
+                      setActiveId(s.id)
+                    }}
+                    className={`w-full text-left text-sm ${
+                      activeId === s.id ? 'text-white' : 'text-app-muted'
+                    }`}
+                  >
+                    <span className="line-clamp-1">{s.title}</span>
+                    <span className="mt-0.5 block line-clamp-1 text-[11px] text-white/35">
+                      {s.body.trim().split(/\r?\n/)[0] || 'Пустой текст'}
+                    </span>
+                  </button>
+                  <div className="mt-1 flex gap-1 opacity-80">
+                    <button
+                      type="button"
+                      onClick={() => void moveSheet(s.id, -1)}
+                      className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-white/50 hover:text-white disabled:opacity-30"
+                      disabled={rows.findIndex((x) => x.id === s.id) === 0}
+                    >
+                      Вверх
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void moveSheet(s.id, 1)}
+                      className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-white/50 hover:text-white disabled:opacity-30"
+                      disabled={rows.findIndex((x) => x.id === s.id) === rows.length - 1}
+                    >
+                      Вниз
+                    </button>
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
@@ -241,7 +347,8 @@ export function CheatSheetsPage(): JSX.Element {
             </div>
           </div>
 
-          <div className="mt-3 flex min-h-0 flex-1 flex-col">
+          <div className="mt-3 grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(220px,32%)]">
+            <div className="flex min-h-0 flex-col">
             <div className="flex items-center justify-between gap-2 text-[11px] text-app-muted">
               <span>Текст · моноширинный редактор</span>
               <span className="tabular-nums text-white/45">{bodyStats}</span>
@@ -253,6 +360,21 @@ export function CheatSheetsPage(): JSX.Element {
               placeholder="Строки, списки, разделитель «---» между блоками…"
               spellCheck={false}
             />
+            </div>
+            <aside className="rounded-lg border border-white/10 bg-black/20 p-3">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-white/45">Предпросмотр</div>
+              <h3 className="mt-2 line-clamp-2 text-sm font-semibold text-white">{title.trim() || 'Без заголовка'}</h3>
+              <pre className="lex-app-scroll mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/25 p-2 font-sans text-xs leading-relaxed text-app-muted">
+                {body.trim() || 'Текст шпаргалки появится здесь. Этот вид ближе к оверлею поверх игры.'}
+              </pre>
+              <button
+                type="button"
+                onClick={() => void copyBody()}
+                className="mt-3 w-full rounded-lg border border-white/10 px-3 py-1.5 text-xs text-app-muted hover:bg-white/5"
+              >
+                Копировать текст
+              </button>
+            </aside>
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-4">

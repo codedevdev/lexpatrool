@@ -11,6 +11,8 @@ export interface HotkeyConfig {
   collectionsOverlay: string
 }
 
+export type HotkeyRegistrationStatus = Record<keyof HotkeyConfig, boolean>
+
 const STORAGE = {
   toggle: 'hotkey_overlay_toggle',
   search: 'hotkey_overlay_search',
@@ -34,6 +36,18 @@ export const HOTKEY_FIELDS: (keyof HotkeyConfig)[] = [
   'cheatsOverlay',
   'collectionsOverlay'
 ]
+
+let lastRegistrationStatus: HotkeyRegistrationStatus = {
+  toggle: true,
+  search: true,
+  clickThrough: true,
+  cheatsOverlay: true,
+  collectionsOverlay: true
+}
+
+export function getHotkeyRegistrationStatus(): HotkeyRegistrationStatus {
+  return { ...lastRegistrationStatus }
+}
 
 export function readHotkeys(db: Database): HotkeyConfig {
   const one = (key: string, fallback: string): string => {
@@ -101,28 +115,38 @@ export function applyOverlayGlobalShortcuts(
   globalShortcut.unregisterAll()
   const h = readHotkeys(db)
 
-  const reg = (accelerator: string, fn: () => void): void => {
+  const nextStatus: HotkeyRegistrationStatus = {
+    toggle: true,
+    search: true,
+    clickThrough: true,
+    cheatsOverlay: true,
+    collectionsOverlay: true
+  }
+
+  const reg = (field: keyof HotkeyConfig, accelerator: string, fn: () => void): void => {
     const ok = globalShortcut.register(accelerator, fn)
+    nextStatus[field] = ok
     if (!ok) {
       console.warn('[LexPatrol] global shortcut failed:', accelerator)
     }
   }
 
-  reg(h.toggle, () => overlay.toggle())
+  reg('toggle', h.toggle, () => overlay.toggle())
 
-  reg(h.search, () => {
-    overlay.show()
+  reg('search', h.search, () => {
+    overlay.show({ forceFocus: true })
     overlay.send('overlay:focus-search')
   })
 
-  reg(h.clickThrough, () => {
+  reg('clickThrough', h.clickThrough, () => {
     overlay.ensure()
     overlay.show()
     overlay.toggleClickThrough()
   })
 
-  reg(h.cheatsOverlay, () => cheatToolOverlay.toggle())
-  reg(h.collectionsOverlay, () => collectionToolOverlay.toggle())
+  reg('cheatsOverlay', h.cheatsOverlay, () => cheatToolOverlay.toggle())
+  reg('collectionsOverlay', h.collectionsOverlay, () => collectionToolOverlay.toggle())
+  lastRegistrationStatus = nextStatus
 
   console.log(
     '[LexPatrol] global shortcuts:',

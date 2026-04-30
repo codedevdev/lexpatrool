@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { AiProviderConfig, AiAgentRecord, AiCompletePayload, AiCitation } from '@shared/types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  AiProviderConfig,
+  AiAgentRecord,
+  AiCompletePayload,
+  AiCitation,
+  AiConversationSummary,
+  AiEmbeddingsStatus,
+  AiEmbeddingsProgress,
+  AiPipelineReport,
+  AiRetrievalHit,
+  AiRetrievalSource
+} from '@shared/types'
 import { AI_AGENT_PRESETS, type AiAgentPreset } from './agent-presets'
 
 const SETTINGS_KEY = 'ai_provider_config'
@@ -14,7 +25,33 @@ const defaultCfg: AiProviderConfig = {
   temperature: 0.2,
   /** Локальные модели (LM Studio и т.п.) и длинные юридические ответы; 1200 часто обрывает текст по лимиту API. */
   maxTokens: 4096,
-  allowBroaderContext: false
+  allowBroaderContext: false,
+  pipeline: {
+    plannerEnabled: true,
+    rerankEnabled: true,
+    situationalPrompt: true
+  },
+  embeddings: {
+    enabled: false,
+    inheritFromMain: true,
+    model: 'text-embedding-3-small'
+  }
+}
+
+/** Дефолтная модель эмбеддингов под выбранный провайдер. */
+function recommendedEmbeddingModel(p: AiProviderConfig['provider']): string {
+  switch (p) {
+    case 'openai':
+      return 'text-embedding-3-small'
+    case 'openai_compatible':
+      return 'text-embedding-nomic-embed-text-v1.5'
+    case 'ollama':
+      return 'nomic-embed-text'
+    case 'gemini':
+      return 'text-embedding-004'
+    default:
+      return 'text-embedding-3-small'
+  }
 }
 
 const emptyAgentForm: Partial<AiAgentRecord> = {
@@ -103,12 +140,13 @@ const PROVIDER_OPTIONS: { id: AiProv; label: string }[] = [
   { id: 'ollama', label: 'Ollama (локально)' }
 ]
 
-type AiTabId = 'connection' | 'generation' | 'agents'
+type AiTabId = 'connection' | 'generation' | 'agents' | 'semantic'
 
 const TABS: { id: AiTabId; label: string; hint: string }[] = [
   { id: 'connection', label: 'Подключение', hint: 'тип API, адрес, ключ, модель' },
   { id: 'generation', label: 'Ответ модели', hint: 'температура, длина, контекст' },
-  { id: 'agents', label: 'Агенты', hint: 'роли и инструкции' }
+  { id: 'agents', label: 'Агенты', hint: 'роли и инструкции' },
+  { id: 'semantic', label: 'Семантический поиск', hint: 'эмбеддинги и индекс' }
 ]
 
 function Hint({ children }: { children: React.ReactNode }): JSX.Element {
@@ -164,12 +202,31 @@ function AiHowItWorksGuide(): JSX.Element {
           </p>
         </section>
         <section className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-app">2. Что делает «Отправить вопрос»</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-app">2. «Один вопрос» и «Диалог»</h3>
+          <p>
+            В блоке <strong className="text-app">«Быстрый вопрос»</strong> можно задать один запрос или вести диалог.
+            Сохранённые диалоги хранятся в вашей локальной базе на этом компьютере — их можно открыть из списка и
+            продолжить позже; на каждый новый ответ снова подбираются подходящие статьи из импортированных материалов (с
+            учётом последних реплик в переписке).
+          </p>
           <ol className="list-decimal space-y-2 pl-5 marker:text-accent">
-            <li>Ваш вопрос ищет подходящие статьи в локальной базе.</li>
-            <li>Фрагменты попадают в контекст для нейросети.</li>
+            <li>Ваш текст ищет подходящие статьи в локальной базе.</li>
+            <li>
+              В контекст модели попадают выдержки из найденных статей: инструкции LexPatrol, краткое из поля{' '}
+              <strong className="text-app">summary_short</strong> в базе (блок «Кратко»), иерархия и основной текст из{' '}
+              <strong className="text-app">body_clean</strong>. Для вопросов по номеру статьи или режиму «справка по
+              статье» в контекст кладётся заметно больше полного тела статьи — чтобы учитывались подпункты вроде 2.1,
+              стадии и примечания.
+            </li>
             <li>Провайдер генерирует ответ только из этого контекста и правил.</li>
           </ol>
+          <p className="text-xs leading-relaxed">
+            <strong className="text-app">Вход</strong> (статьи + системное сообщение + ваш вопрос) и{' '}
+            <strong className="text-app">выход</strong> (текст ответа) считаются отдельно: «Макс. токенов ответа» в
+            настройках LexPatrol задаёт только лимит на <em>ответ</em>. Если модель или сервер обрезает{' '}
+            <em>начало</em> промпта или ответ странно короткий — у локального LM Studio увеличьте длину контекста
+            модели (см. «Как подключить ИИ» → LM Studio); в облаке обычно действует лимит контекста тарифа.
+          </p>
         </section>
         <section className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-app">3. Вкладки настройки</h3>
@@ -185,7 +242,8 @@ function AiHowItWorksGuide(): JSX.Element {
             </li>
           </ul>
           <p className="text-xs">
-            Проверить запрос можно в блоке <strong className="text-app">«Быстрый вопрос»</strong> на этой же странице — отдельная вкладка не нужна.
+            Проверить запрос можно в блоке <strong className="text-app">«Быстрый вопрос»</strong> (один вопрос или
+            диалог) на этой же странице — отдельная вкладка не нужна.
           </p>
         </section>
         <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-app-muted">
@@ -276,6 +334,20 @@ function AiProviderSetupGuide(): JSX.Element {
               Поле <strong className="text-app">API ключ</strong> при локальном сервере можно заполнить любой
               несекретной заглушкой (например <code className="rounded bg-white/10 px-1 py-px text-[11px]">lm-studio</code>
               ) — LM Studio для локального режима ключ не проверяет, а LexPatrol требует непустое значение.
+            </li>
+            <li>
+              <strong className="text-app">Длина контекста (важно для LexPatrol).</strong> Во вкладке локального сервера
+              (Developer / <strong className="text-app">Server</strong>) для выбранной модели задайте достаточный{' '}
+              <strong className="text-app">Context length</strong> / «размер контекста» (в новых версиях LM Studio это
+              рядом с загрузкой модели или в настройках сервера). Вопросы по длинным статьям с подпунктами отправляют в
+              модель большой системный промпт с текстом статей; если контекст на стороне LM Studio меньше, хвост промпта
+              может тихо обрезаться — ответы станут неточными. Ориентир: не ниже 8k токенов для коротких справок, для
+              разборов процедурных статей комфортнее <strong className="text-app">16k–32k+</strong> при наличии RAM/VRAM.
+            </li>
+            <li>
+              <strong className="text-app">Reasoning / Thinking.</strong> Если модель с «размышлением» съедает квоту
+              токенов и в ответе пусто — в LexPatrol увеличьте «Макс. токенов ответа» и при необходимости в LM Studio
+              снизьте долю reasoning или отключите принудительный Thinking, чтобы оставалось место под финальный текст.
             </li>
           </ol>
         </section>
@@ -386,10 +458,83 @@ function ProviderFields({
               onChange={(e) => setCfg({ ...cfg, maxTokens: Number(e.target.value) })}
             />
             <Hint>
-              Лимит на стороне модели. Если ответ обрывается на полуслове — увеличьте (для LM Studio часто 4096–8192).
+              Лимит на стороне API только для <strong className="text-app">генерации ответа</strong> (поле{' '}
+              <code className="rounded bg-white/10 px-0.5">max_tokens</code>). Если ответ обрывается на полуслове —
+              увеличьте (для LM Studio часто <strong className="text-app">4096–8192</strong>). На размер{' '}
+              <strong className="text-app">входа</strong> (найденные статьи + инструкции) это поле не влияет: для
+              вопросов по статье приложение подставляет много текста из базы — при локальном LM Studio увеличьте{' '}
+              <strong className="text-app">Context length</strong> у модели (см. «Как подключить ИИ» → LM Studio).
             </Hint>
           </label>
         </div>
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-app-muted">Конвейер RAG</p>
+          <p className="mt-2 text-xs leading-relaxed text-app-muted">
+            Дополнительные шаги для качественного поиска статей. На слабых reasoning-моделях (LM Studio с принудительным
+            «Thinking») их можно выключить — поиск тогда работает по ключевым словам без LLM-перепиСки.
+          </p>
+          <div className="mt-3 space-y-2">
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.03] p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-white/20 bg-surface-raised text-accent focus:ring-accent"
+                checked={cfg.pipeline?.plannerEnabled !== false}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    pipeline: { ...(cfg.pipeline ?? {}), plannerEnabled: e.target.checked }
+                  })
+                }
+              />
+              <span className="text-sm text-app-muted">
+                <span className="font-medium text-white">Перепись запроса (planner)</span>
+                <span className="mt-1 block text-xs leading-relaxed opacity-90">
+                  Перед поиском ИИ переформулирует ваш вопрос в поисковую фразу: расшифрует RP-сленг и аббревиатуры
+                  («ук», «пк»), выделит номера статей и интент. +1 короткий запрос к API.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.03] p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-white/20 bg-surface-raised text-accent focus:ring-accent"
+                checked={cfg.pipeline?.rerankEnabled !== false}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    pipeline: { ...(cfg.pipeline ?? {}), rerankEnabled: e.target.checked }
+                  })
+                }
+              />
+              <span className="text-sm text-app-muted">
+                <span className="font-medium text-white">LLM-реранкер</span>
+                <span className="mt-1 block text-xs leading-relaxed opacity-90">
+                  Из найденных кандидатов модель выбирает самые релевантные. Срабатывает при ≥ 13 кандидатов; +1 короткий запрос.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.03] p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-white/20 bg-surface-raised text-accent focus:ring-accent"
+                checked={cfg.pipeline?.situationalPrompt !== false}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    pipeline: { ...(cfg.pipeline ?? {}), situationalPrompt: e.target.checked }
+                  })
+                }
+              />
+              <span className="text-sm text-app-muted">
+                <span className="font-medium text-white">Ситуационный режим</span>
+                <span className="mt-1 block text-xs leading-relaxed opacity-90">
+                  Для вопросов «что будет за …», «как оформить …» — структура: квалификация → норма → санкция → процесс.
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+
         <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-app-muted">Расширение контекста</p>
           <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.03] p-3">
@@ -589,6 +734,101 @@ function AiAnswerRich({ text, citations }: { text: string; citations: AiCitation
   return <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-app">{nodes}</div>
 }
 
+function formatSavedChatLabel(c: AiConversationSummary): string {
+  const d = c.updated_at.slice(0, 16).replace('T', ' ')
+  const title = c.title.length > 52 ? `${c.title.slice(0, 49)}…` : c.title
+  return `${title} · ${d}`
+}
+
+/** Кастомный список вместо нативного select: в Electron он часто перехватывает клавиатуру после диалогов и смены списка. */
+function SavedChatPicker({
+  savedChats,
+  activeId,
+  busy,
+  onSelect
+}: {
+  savedChats: AiConversationSummary[]
+  activeId: string | null
+  busy: boolean
+  onSelect: (id: string | null) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      const el = rootRef.current
+      if (el && e.target instanceof Node && !el.contains(e.target)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const activeRow = activeId ? savedChats.find((c) => c.id === activeId) : undefined
+  const activeLabel = activeRow ? formatSavedChatLabel(activeRow) : '— Новый диалог —'
+
+  return (
+    <div className="relative min-w-0 flex-1" ref={rootRef}>
+      <button
+        type="button"
+        disabled={busy}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-left text-sm text-white hover:bg-white/[0.04] disabled:opacity-40"
+      >
+        <span className="min-w-0 truncate">{activeLabel}</span>
+        <span className="shrink-0 text-app-muted" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <ul
+          className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-lg border border-white/[0.12] bg-[#12151c] py-1 shadow-xl lex-ai-answer-scroll"
+          role="listbox"
+        >
+          <li role="presentation">
+            <button
+              type="button"
+              role="option"
+              className="w-full px-3 py-2 text-left text-sm text-white hover:bg-white/[0.08]"
+              onClick={() => {
+                onSelect(null)
+                setOpen(false)
+              }}
+            >
+              — Новый диалог —
+            </button>
+          </li>
+          {savedChats.map((c) => (
+            <li key={c.id} role="presentation">
+              <button
+                type="button"
+                role="option"
+                className="w-full px-3 py-2 text-left text-sm text-white hover:bg-white/[0.08]"
+                onClick={() => {
+                  onSelect(c.id)
+                  setOpen(false)
+                }}
+              >
+                {formatSavedChatLabel(c)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function AiCitationFooter({ citations }: { citations: AiCitation[] }): JSX.Element | null {
   if (citations.length === 0) return null
   return (
@@ -600,8 +840,8 @@ function AiCitationFooter({ citations }: { citations: AiCitation[] }): JSX.Eleme
             key={c.articleId}
             className="flex flex-wrap items-start justify-between gap-2 gap-y-1 border-b border-white/[0.06] pb-2 last:border-0 last:pb-0"
           >
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-white">{c.articleLabel}</div>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="truncate text-sm font-medium text-white">{c.articleLabel}</div>
               <div className="truncate text-xs text-app-muted" title={c.documentTitle}>
                 {c.documentTitle}
               </div>
@@ -616,6 +856,437 @@ function AiCitationFooter({ citations }: { citations: AiCitation[] }): JSX.Eleme
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+const RETRIEVAL_SOURCE_LABEL: Record<AiRetrievalSource, string> = {
+  fts: 'ключи',
+  embedding: 'смысл',
+  'article-num': 'номер',
+  'chat-pinned': 'из диалога',
+  'rerank-llm': 'LLM-rerank'
+}
+
+/** Прозрачность retrieval: какие статьи попали в контекст модели и из какого источника. */
+function AiRetrievalPanel({
+  retrieved,
+  pipeline
+}: {
+  retrieved?: AiRetrievalHit[]
+  pipeline?: AiPipelineReport
+}): JSX.Element | null {
+  if (!retrieved?.length && !pipeline) return null
+  const hits = retrieved ?? []
+  const stages = pipeline?.stages
+  return (
+    <details className="mt-3 rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2.5 open:bg-black/20">
+      <summary className="cursor-pointer list-none text-xs font-medium text-app-muted [&::-webkit-details-marker]:hidden">
+        <span className="flex flex-wrap items-baseline justify-between gap-2">
+          <span className="text-white">
+            Что нашлось в базе{' '}
+            <span className="font-normal text-app-muted">({hits.length})</span>
+          </span>
+          {pipeline?.intent && (
+            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-app-muted">
+              intent: {pipeline.intent}
+            </span>
+          )}
+        </span>
+      </summary>
+      <div className="mt-2 space-y-2 text-xs leading-relaxed">
+        {pipeline && (
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-app-muted">
+            {pipeline.searchQuery && pipeline.searchQuery.length > 0 && (
+              <span>
+                Поиск:{' '}
+                <span className="font-medium text-white">
+                  {pipeline.searchQuery.length > 90
+                    ? `${pipeline.searchQuery.slice(0, 87)}…`
+                    : pipeline.searchQuery}
+                </span>
+              </span>
+            )}
+            {stages && (
+              <span className="ml-auto flex flex-wrap gap-1.5">
+                <StageBadge label="planner" state={stages.planner} />
+                <StageBadge label="emb." state={stages.embeddings} />
+                <StageBadge label="rerank" state={stages.rerank} />
+              </span>
+            )}
+          </div>
+        )}
+        {pipeline?.codexHintsApplied?.length ? (
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="text-app-muted">Кодекс:</span>
+            {pipeline.codexHintsApplied.map((root) => (
+              <span
+                key={root}
+                className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                  pipeline.codexFilterApplied
+                    ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-100'
+                    : 'border-amber-400/40 bg-amber-400/10 text-amber-100'
+                }`}
+                title={
+                  pipeline.codexFilterApplied
+                    ? 'Поиск ограничен документами с этим корнем в названии'
+                    : 'В указанном кодексе подходящих статей не нашлось — показан общий список'
+                }
+              >
+                {root}
+                {pipeline.codexFilterApplied ? '' : ' (нет статей)'}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {hits.length === 0 ? (
+          <p className="text-app-muted">Поиск не вернул статей по этому запросу.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {hits.map((h) => {
+              const num = h.articleNumber?.trim()
+              const label = num ? `Статья ${num} — ${h.heading}` : h.heading
+              return (
+                <li
+                  key={h.articleId}
+                  className="rounded-md border border-white/[0.05] bg-white/[0.03] px-2.5 py-1.5"
+                >
+                  <div className="flex items-start gap-2 sm:gap-3">
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <button
+                        type="button"
+                        title="Открыть в читателе"
+                        onClick={() => void window.lawHelper.openReader(h.documentId, h.articleId)}
+                        className="block w-full min-w-0 truncate text-left text-sm font-medium text-white hover:underline"
+                      >
+                        {label}
+                      </button>
+                      <div className="truncate text-[11px] text-app-muted" title={h.documentTitle}>
+                        {h.documentTitle}
+                      </div>
+                      {h.snippet && (
+                        <div className="mt-1 line-clamp-2 text-[11px] text-app-muted/95">{h.snippet}</div>
+                      )}
+                    </div>
+                    <div className="relative z-[1] flex shrink-0 flex-col items-end gap-1 self-start">
+                      <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-app-muted">
+                        score {h.score.toFixed(2)}
+                      </span>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {h.sources.map((s) => (
+                          <span
+                            key={s}
+                            className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[10px] text-app-muted/95"
+                          >
+                            {RETRIEVAL_SOURCE_LABEL[s] ?? s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function StageBadge({ label, state }: { label: string; state: 'on' | 'off' | 'unavailable' | 'failed' }): JSX.Element {
+  const tone =
+    state === 'on'
+      ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-100'
+      : state === 'failed'
+        ? 'border-amber-400/40 bg-amber-400/10 text-amber-100'
+        : state === 'unavailable'
+          ? 'border-sky-400/30 bg-sky-400/10 text-sky-100'
+          : 'border-white/10 bg-white/[0.04] text-app-muted'
+  return (
+    <span className={`rounded border px-1.5 py-0.5 text-[10px] ${tone}`}>
+      {label}: {state}
+    </span>
+  )
+}
+
+function SemanticTab({
+  cfg,
+  setCfg,
+  status,
+  progress,
+  busy,
+  error,
+  onSave,
+  onRebuild,
+  onCancel,
+  onClear,
+  onRefresh
+}: {
+  cfg: AiProviderConfig
+  setCfg: React.Dispatch<React.SetStateAction<AiProviderConfig>>
+  status: AiEmbeddingsStatus | null
+  progress: AiEmbeddingsProgress | null
+  busy: boolean
+  error: string | null
+  onSave: () => void
+  onRebuild: () => void
+  onCancel: () => void
+  onClear: () => void
+  onRefresh: () => void
+}): JSX.Element {
+  const e = cfg.embeddings ?? { enabled: false, model: 'text-embedding-3-small', inheritFromMain: true }
+  const inherit = e.inheritFromMain !== false
+  const effectiveProvider = inherit ? cfg.provider : (e.provider ?? 'openai')
+  const setE = (next: Partial<AiProviderConfig['embeddings']>): void => {
+    const cur = cfg.embeddings ?? {
+      enabled: false,
+      model: recommendedEmbeddingModel(cfg.provider),
+      inheritFromMain: true
+    }
+    setCfg({ ...cfg, embeddings: { ...cur, ...next } } as AiProviderConfig)
+  }
+
+  const enabled = e.enabled
+  const dirtyPercent =
+    status && status.totalArticles > 0
+      ? Math.round(((status.totalArticles - status.indexedArticles) / status.totalArticles) * 100)
+      : null
+  const progressPercent =
+    progress && progress.total > 0 ? Math.min(100, Math.round((progress.processed / progress.total) * 100)) : null
+
+  return (
+    <TabPanel
+      title="Семантический поиск"
+      subtitle="Поиск статей не только по словам, но и «по смыслу». Эмбеддинги хранятся локально на этом ПК и не отправляются никому, кроме выбранного провайдера embedding-модели."
+    >
+      <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-app-muted">Включение</p>
+        <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.03] p-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 rounded border-white/20 bg-surface-raised text-accent focus:ring-accent"
+            checked={enabled}
+            onChange={(ev) => setE({ enabled: ev.target.checked })}
+          />
+          <span className="text-sm text-app-muted">
+            <span className="font-medium text-white">Использовать семантический поиск в ответах ИИ</span>
+            <span className="mt-1 block text-xs leading-relaxed opacity-90">
+              Дополняет поиск по ключевым словам поиском «по смыслу»: запрос и каждая статья превращаются в вектор, далее
+              сравниваются по косинусной близости. Без этого пункта ИИ работает по словам и номерам статей (как раньше).
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {enabled && (
+        <>
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-app-muted">Источник embeddings</p>
+            <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.03] p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-white/20 bg-surface-raised text-accent focus:ring-accent"
+                checked={inherit}
+                onChange={(ev) => setE({ inheritFromMain: ev.target.checked })}
+              />
+              <span className="text-sm text-app-muted">
+                <span className="font-medium text-white">Использовать тот же провайдер, что и для ответов</span>
+                <span className="mt-1 block text-xs leading-relaxed opacity-90">
+                  Для OpenAI / OpenAI-compatible / Ollama / Gemini можно переиспользовать base URL и ключ. Для Anthropic
+                  нужен отдельный провайдер — снимите галочку и укажите OpenAI или LM Studio.
+                </span>
+              </span>
+            </label>
+
+            {!inherit && (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-app-muted">Тип API</span>
+                  <select
+                    className="mt-1.5 w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2.5 text-sm text-white"
+                    value={e.provider ?? 'openai'}
+                    onChange={(ev) => {
+                      const next = ev.target.value as NonNullable<AiProviderConfig['embeddings']>['provider']
+                      setE({ provider: next, model: recommendedEmbeddingModel(next ?? 'openai') })
+                    }}
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="openai_compatible">OpenAI-compatible (LM Studio, vLLM, Groq)</option>
+                    <option value="ollama">Ollama</option>
+                    <option value="gemini">Google Gemini</option>
+                  </select>
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-app-muted">Base URL</span>
+                  <input
+                    className="mt-1.5 w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2.5 text-sm text-white"
+                    value={e.baseUrl ?? ''}
+                    onChange={(ev) => setE({ baseUrl: ev.target.value })}
+                    placeholder="https://api.openai.com/v1 или http://127.0.0.1:1234/v1"
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-app-muted">API ключ</span>
+                  <input
+                    type="password"
+                    className="mt-1.5 w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2.5 text-sm text-white"
+                    value={e.apiKey ?? ''}
+                    onChange={(ev) => setE({ apiKey: ev.target.value })}
+                  />
+                </label>
+              </div>
+            )}
+
+            <label className="mt-3 block">
+              <span className="text-xs font-medium text-app-muted">Модель embeddings</span>
+              <input
+                className="mt-1.5 w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2.5 text-sm text-white"
+                value={e.model ?? ''}
+                onChange={(ev) => setE({ model: ev.target.value })}
+                placeholder={recommendedEmbeddingModel(effectiveProvider)}
+              />
+              <Hint>
+                OpenAI: <code className="rounded bg-white/10 px-1 py-px text-[11px]">text-embedding-3-small</code> или{' '}
+                <code className="rounded bg-white/10 px-1 py-px text-[11px]">text-embedding-3-large</code>. Ollama:{' '}
+                <code className="rounded bg-white/10 px-1 py-px text-[11px]">nomic-embed-text</code>. LM Studio: загрузите
+                embed-модель и в Server tab включите «Embedding model».
+              </Hint>
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-app-muted">Состояние индекса</p>
+              <button
+                type="button"
+                onClick={onRefresh}
+                className="text-[11px] text-accent hover:underline"
+              >
+                Обновить
+              </button>
+            </div>
+            <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <div className="flex justify-between gap-3 border-b border-white/[0.05] pb-1.5">
+                <dt className="text-app-muted">Всего статей</dt>
+                <dd className="text-right text-white">{status?.totalArticles ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3 border-b border-white/[0.05] pb-1.5">
+                <dt className="text-app-muted">Проиндексировано</dt>
+                <dd className="text-right text-white">
+                  {status?.indexedArticles ?? '—'}
+                  {dirtyPercent !== null && status && status.indexedArticles > 0 && (
+                    <span className="ml-1 text-[11px] text-app-muted">({100 - dirtyPercent}%)</span>
+                  )}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3 border-b border-white/[0.05] pb-1.5">
+                <dt className="text-app-muted">Ожидают пересчёта</dt>
+                <dd className="text-right text-white">{status?.dirtyArticles ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3 border-b border-white/[0.05] pb-1.5">
+                <dt className="text-app-muted">Несовпадение модели</dt>
+                <dd className="text-right text-white">{status?.modelMismatch ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3 border-b border-white/[0.05] pb-1.5 sm:col-span-2">
+                <dt className="text-app-muted">Текущая модель</dt>
+                <dd className="text-right text-white">{status?.currentModel ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3 sm:col-span-2">
+                <dt className="text-app-muted">Последнее обновление</dt>
+                <dd className="text-right text-white">
+                  {status?.lastBuiltAt ? status.lastBuiltAt.replace('T', ' ').slice(0, 19) : '—'}
+                </dd>
+              </div>
+            </dl>
+
+            {progress && progress.phase !== 'starting' && (
+              <div className="mt-4">
+                <div className="flex items-baseline justify-between text-xs text-app-muted">
+                  <span>
+                    {progress.phase === 'done'
+                      ? 'Готово'
+                      : progress.phase === 'cancelled'
+                        ? 'Отменено'
+                        : progress.phase === 'error'
+                          ? 'Ошибка'
+                          : 'Считаем эмбеддинги…'}
+                  </span>
+                  <span>
+                    {progress.processed} / {progress.total}
+                  </span>
+                </div>
+                <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className={`h-full transition-all ${
+                      progress.phase === 'error'
+                        ? 'bg-amber-400/70'
+                        : progress.phase === 'cancelled'
+                          ? 'bg-white/30'
+                          : 'bg-accent'
+                    }`}
+                    style={{ width: `${progressPercent ?? 0}%` }}
+                  />
+                </div>
+                {progress.currentTitle && progress.phase === 'embedding' && (
+                  <p className="mt-1 truncate text-[11px] text-app-muted/95">…{progress.currentTitle}</p>
+                )}
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                {error}
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onSave}
+                className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-white hover:bg-white/[0.06]"
+              >
+                Сохранить настройки
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onRebuild}
+                className="rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-dim disabled:opacity-40"
+              >
+                {busy ? 'Идёт…' : status?.indexedArticles === 0 ? 'Построить индекс' : 'Перестроить'}
+              </button>
+              {busy && (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-app-muted hover:bg-white/[0.04]"
+                >
+                  Отмена
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy || (status?.indexedArticles ?? 0) === 0}
+                onClick={onClear}
+                className="rounded-lg border border-red-400/25 px-4 py-2.5 text-sm text-red-200/95 hover:bg-red-500/15 disabled:opacity-40"
+              >
+                Очистить индекс
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </TabPanel>
+  )
+}
+
+/** Предупреждение от провайдера ИИ (лимит токенов и т.д.) — не ошибка, но важно для пользователя. */
+function AiProviderNoticeBar({ children }: { children: React.ReactNode }): JSX.Element {
+  return (
+    <div className="mt-3 rounded-lg border border-sky-400/35 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-50/95">
+      <span className="font-medium text-sky-200/95">Внимание: </span>
+      {children}
     </div>
   )
 }
@@ -663,13 +1334,53 @@ export function AiPage(): JSX.Element {
   const [q, setQ] = useState('Какие статьи уместно проверить при задержании по демо-документу?')
   const [out, setOut] = useState('')
   const [citations, setCitations] = useState<AiCitation[]>([])
+  const [retrieved, setRetrieved] = useState<AiRetrievalHit[]>([])
+  const [pipelineReport, setPipelineReport] = useState<AiPipelineReport | null>(null)
   const [busy, setBusy] = useState(false)
   const [warn, setWarn] = useState<string | null>(null)
   const [saveToast, setSaveToast] = useState<string | null>(null)
+  /** Сообщение провайдера (обрезка по лимиту токенов и т.д.) для режима «Один вопрос». */
+  const [completionNotice, setCompletionNotice] = useState<string | null>(null)
+
+  type AiQuickMode = 'single' | 'chat'
+  type ChatTurn = {
+    id: string
+    role: 'user' | 'assistant'
+    content: string
+    citations?: AiCitation[]
+    retrieved?: AiRetrievalHit[]
+    pipeline?: AiPipelineReport
+    notice?: string | null
+  }
+
+  const [quickMode, setQuickMode] = useState<AiQuickMode>('single')
+  const [chatMessages, setChatMessages] = useState<ChatTurn[]>([])
+  const [chatInput, setChatInput] = useState('')
+  /** Снятые пользователем закрепы — id не подмешиваются принудительно при следующем chatTurn. */
+  const [excludedPinIds, setExcludedPinIds] = useState<Set<string>>(new Set())
+  const chatScrollRef = useRef<HTMLDivElement>(null)
+  const chatInputRef = useRef<HTMLTextAreaElement>(null)
+
+  const [savedChats, setSavedChats] = useState<AiConversationSummary[]>([])
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  /** Подтверждение удаления только в React — нативный confirm в Electron ломает фокус WebView. */
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false)
+
+  /* ------ embeddings (вкладка «Семантический поиск») ------ */
+  const [embStatus, setEmbStatus] = useState<AiEmbeddingsStatus | null>(null)
+  const [embProgress, setEmbProgress] = useState<AiEmbeddingsProgress | null>(null)
+  const [embBusy, setEmbBusy] = useState(false)
+  const [embError, setEmbError] = useState<string | null>(null)
 
   const reloadAgents = useCallback(async (): Promise<void> => {
     const list = await window.lawHelper.aiAgents.list()
     setAgents(list)
+  }, [])
+
+  const reloadSavedChats = useCallback(async (): Promise<void> => {
+    const list = await window.lawHelper.aiChat.list()
+    setSavedChats(list)
   }, [])
 
   useEffect(() => {
@@ -682,7 +1393,15 @@ export function AiPage(): JSX.Element {
       let nextCfg = defaultCfg
       if (raw) {
         try {
-          nextCfg = { ...defaultCfg, ...(JSON.parse(raw) as AiProviderConfig) }
+          const parsed = JSON.parse(raw) as AiProviderConfig
+          nextCfg = {
+            ...defaultCfg,
+            ...parsed,
+            pipeline: { ...(defaultCfg.pipeline ?? {}), ...(parsed.pipeline ?? {}) },
+            embeddings: parsed.embeddings
+              ? { ...defaultCfg.embeddings!, ...parsed.embeddings }
+              : defaultCfg.embeddings
+          }
           if (nextCfg.maxTokens === 1200) {
             nextCfg = { ...nextCfg, maxTokens: 4096 }
             await window.lawHelper.settings.set(SETTINGS_KEY, JSON.stringify(nextCfg))
@@ -708,6 +1427,22 @@ export function AiPage(): JSX.Element {
       cancelled = true
     }
   }, [reloadAgents])
+
+  useEffect(() => {
+    if (!bootstrapped || !wizardDone) return
+    void reloadSavedChats()
+  }, [bootstrapped, wizardDone, quickMode, reloadSavedChats])
+
+  useEffect(() => {
+    if (!deleteConfirmOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      if (!deleteConfirmBusy) setDeleteConfirmOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [deleteConfirmOpen, deleteConfirmBusy])
 
   async function saveCfg(): Promise<void> {
     await window.lawHelper.settings.set(SETTINGS_KEY, JSON.stringify(cfg))
@@ -761,8 +1496,11 @@ export function AiPage(): JSX.Element {
   async function ask(): Promise<void> {
     setBusy(true)
     setWarn(null)
+    setCompletionNotice(null)
     setOut('')
     setCitations([])
+    setRetrieved([])
+    setPipelineReport(null)
     try {
       const needsKey = cfg.provider !== 'ollama'
       const keyFromCfg = cfg.apiKey?.trim()
@@ -777,12 +1515,281 @@ export function AiPage(): JSX.Element {
       }
       const res = await window.lawHelper.ai.complete(payload)
       setOut(res.text)
-      setCitations(Array.isArray(res.citations) ? (res.citations as AiCitation[]) : [])
+      setCitations(Array.isArray(res.citations) ? res.citations : [])
+      setRetrieved(Array.isArray(res.retrieved) ? res.retrieved : [])
+      setPipelineReport(res.pipeline ?? null)
+      setCompletionNotice(typeof res.notice === 'string' && res.notice.trim() ? res.notice : null)
     } catch (e) {
       setWarn(e instanceof Error ? e.message : 'Ошибка запроса')
     } finally {
       setBusy(false)
     }
+  }
+
+  function newChatMsgId(): string {
+    return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `m-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+  }
+
+  async function loadConversation(id: string | null): Promise<void> {
+    if (busy) return
+    setWarn(null)
+    setExcludedPinIds(new Set())
+    if (!id) {
+      setActiveConversationId(null)
+      setChatMessages([])
+      return
+    }
+    const data = await window.lawHelper.aiChat.get(id)
+    if (!data) {
+      setWarn('Диалог не найден или удалён.')
+      await reloadSavedChats()
+      return
+    }
+    setActiveConversationId(id)
+    setAgentId(data.conversation.agent_id ?? '')
+    setChatMessages(
+      data.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        citations: m.citations ?? undefined
+      }))
+    )
+  }
+
+  function beginNewChat(): void {
+    if (busy) return
+    setWarn(null)
+    setActiveConversationId(null)
+    setChatMessages([])
+    setChatInput('')
+    setExcludedPinIds(new Set())
+  }
+
+  /** Список последних обсуждённых статей (citations из последних ответов диалога) — без снятых пользователем. */
+  const chatPinnedHits = useMemo<AiCitation[]>(() => {
+    const seen = new Set<string>()
+    const out: AiCitation[] = []
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+      const m = chatMessages[i]
+      if (!m || m.role !== 'assistant') continue
+      const list = m.citations ?? []
+      for (const c of list) {
+        if (!c?.articleId || seen.has(c.articleId)) continue
+        if (excludedPinIds.has(c.articleId)) continue
+        seen.add(c.articleId)
+        out.push(c)
+        if (out.length >= 8) return out
+      }
+    }
+    return out
+  }, [chatMessages, excludedPinIds])
+
+  function openDeleteSavedConversationDialog(): void {
+    if (!activeConversationId || busy || deleteConfirmBusy) return
+    setDeleteConfirmOpen(true)
+  }
+
+  async function confirmDeleteSavedConversation(): Promise<void> {
+    const id = activeConversationId
+    if (!id || busy) return
+    setDeleteConfirmBusy(true)
+    setWarn(null)
+    try {
+      await window.lawHelper.aiChat.delete(id)
+      setDeleteConfirmOpen(false)
+      setActiveConversationId(null)
+      setChatMessages([])
+      setChatInput('')
+      setExcludedPinIds(new Set())
+      await reloadSavedChats()
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          chatInputRef.current?.focus({ preventScroll: true })
+        })
+      })
+    } catch (e) {
+      setWarn(e instanceof Error ? e.message : 'Не удалось удалить диалог')
+    } finally {
+      setDeleteConfirmBusy(false)
+    }
+  }
+
+  async function renameSavedConversation(): Promise<void> {
+    if (!activeConversationId || busy) return
+    const cur = savedChats.find((c) => c.id === activeConversationId)
+    const next = window.prompt('Название диалога', cur?.title ?? '')
+    if (next === null) return
+    const t = next.trim()
+    if (!t) return
+    await window.lawHelper.aiChat.rename({ id: activeConversationId, title: t })
+    await reloadSavedChats()
+  }
+
+  async function sendChat(): Promise<void> {
+    const trimmed = chatInput.trim()
+    if (!trimmed || busy) return
+    setWarn(null)
+    const needsKey = cfg.provider !== 'ollama'
+    const keyFromCfg = cfg.apiKey?.trim()
+    if (needsKey && !keyFromCfg) {
+      setWarn('Укажите API ключ в разделе «Подключение».')
+      return
+    }
+
+    let convId = activeConversationId
+    let createdNewSession = false
+    const priorHistory = chatMessages.map(({ role, content }) => ({ role, content }))
+    const userId = newChatMsgId()
+
+    if (!convId) {
+      try {
+        const { id } = await window.lawHelper.aiChat.create({
+          cfg,
+          agentId: agentId || null
+        })
+        convId = id
+        createdNewSession = true
+        setActiveConversationId(id)
+        await reloadSavedChats()
+      } catch (e) {
+        setWarn(e instanceof Error ? e.message : 'Не удалось создать диалог')
+        return
+      }
+    }
+
+    setChatMessages((prev) => [...prev, { id: userId, role: 'user', content: trimmed }])
+    setChatInput('')
+    setBusy(true)
+    try {
+      const res = await window.lawHelper.ai.chatTurn({
+        cfg,
+        agentId: agentId || null,
+        history: priorHistory,
+        message: trimmed,
+        pinnedArticleIds: chatPinnedHits.map((c) => c.articleId),
+        excludePinnedIds: [...excludedPinIds]
+      })
+      const cites = Array.isArray(res.citations) ? res.citations : []
+      const hits = Array.isArray(res.retrieved) ? res.retrieved : []
+      await window.lawHelper.aiChat.appendTurn({
+        conversationId: convId!,
+        userContent: trimmed,
+        assistantContent: res.text,
+        citations: cites,
+        agentId: agentId || null
+      })
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: newChatMsgId(),
+          role: 'assistant',
+          content: res.text,
+          citations: cites,
+          retrieved: hits,
+          pipeline: res.pipeline,
+          notice:
+            typeof res.notice === 'string' && res.notice.trim() ? res.notice.trim() : undefined
+        }
+      ])
+      await reloadSavedChats()
+    } catch (e) {
+      setWarn(e instanceof Error ? e.message : 'Ошибка запроса')
+      setChatMessages((prev) => prev.filter((m) => m.id !== userId))
+      if (createdNewSession && convId) {
+        try {
+          await window.lawHelper.aiChat.delete(convId)
+        } catch {
+          /* ignore */
+        }
+        setActiveConversationId(null)
+        await reloadSavedChats()
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (quickMode !== 'chat') return
+    const el = chatScrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [chatMessages, quickMode])
+
+  /* ----------- embeddings: статус и прогресс ----------- */
+
+  /** Мост preload `ai.embeddings` появился в 1.6+. Если запущен старый `out/preload`
+   *  (например, при обычном `npm run dev` без перезапуска Electron — preload не перегружается HMR),
+   *  любой прямой вызов выкинул бы TypeError на маунте, и dev-overlay перекрыл бы весь UI ИИ
+   *  (в т.ч. поле ввода чата). Поэтому везде ходим через guard. */
+  const embApi = window.lawHelper?.ai?.embeddings
+
+  const reloadEmbStatus = useCallback(async (): Promise<void> => {
+    if (!embApi) {
+      setEmbError('Перезапустите приложение: обновлён preload-мост (ai.embeddings).')
+      return
+    }
+    try {
+      const s = await embApi.status(cfg)
+      setEmbStatus(s)
+    } catch (e) {
+      setEmbError(e instanceof Error ? e.message : String(e))
+    }
+  }, [cfg, embApi])
+
+  useEffect(() => {
+    if (!showAdvanced || activeTab !== 'semantic') return
+    void reloadEmbStatus()
+  }, [showAdvanced, activeTab, reloadEmbStatus])
+
+  useEffect(() => {
+    if (!embApi) return
+    const off = embApi.onProgress((p) => {
+      setEmbProgress(p)
+      if (p.phase === 'done' || p.phase === 'cancelled' || p.phase === 'error') {
+        setEmbBusy(false)
+        if (p.phase === 'error' && p.message) setEmbError(p.message)
+        void reloadEmbStatus()
+      }
+    })
+    return off
+  }, [embApi, reloadEmbStatus])
+
+  async function startEmbRebuild(): Promise<void> {
+    if (!embApi) {
+      setEmbError('Перезапустите приложение: обновлён preload-мост (ai.embeddings).')
+      return
+    }
+    setEmbError(null)
+    setEmbBusy(true)
+    setEmbProgress({ phase: 'starting', processed: 0, total: 0 })
+    try {
+      const final = await embApi.rebuild(cfg)
+      // onProgress всё равно прислал то же — но guard на случай отсутствия событий.
+      setEmbProgress(final)
+      if (final.phase === 'error' && final.message) setEmbError(final.message)
+    } catch (e) {
+      setEmbError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEmbBusy(false)
+      void reloadEmbStatus()
+    }
+  }
+
+  async function cancelEmbRebuild(): Promise<void> {
+    if (!embApi) return
+    await embApi.cancel()
+  }
+
+  async function clearEmbIndex(): Promise<void> {
+    if (!embApi) return
+    if (!window.confirm('Очистить семантический индекс? После этого нужно будет пересобрать его заново.')) return
+    await embApi.clear()
+    setEmbProgress(null)
+    await reloadEmbStatus()
   }
 
   async function saveAgent(): Promise<void> {
@@ -1013,6 +2020,7 @@ export function AiPage(): JSX.Element {
 
   /* ---------- Хаб после мастера + опционально расширенный редактор ---------- */
   return (
+    <>
     <div className="mx-auto flex max-w-4xl flex-col pb-8">
       {saveToast && (
         <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-4 py-2 text-center text-sm text-emerald-100">
@@ -1330,6 +2338,22 @@ export function AiPage(): JSX.Element {
             </TabPanel>
           )}
 
+          {activeTab === 'semantic' && (
+            <SemanticTab
+              cfg={cfg}
+              setCfg={setCfg}
+              status={embStatus}
+              progress={embProgress}
+              busy={embBusy}
+              error={embError}
+              onSave={() => void saveCfg()}
+              onRebuild={() => void startEmbRebuild()}
+              onCancel={() => void cancelEmbRebuild()}
+              onClear={() => void clearEmbIndex()}
+              onRefresh={() => void reloadEmbStatus()}
+            />
+          )}
+
         </div>
       </div>
       )}
@@ -1341,7 +2365,95 @@ export function AiPage(): JSX.Element {
           <p className="mt-1 text-xs text-app-muted">
             Без перехода в полную настройку. Длинный ответ — прокрутка в рамке ниже; при обрыве на полуслове увеличьте
             «Макс. токенов ответа» в разделе <strong className="font-medium text-app">Полная настройка → Ответ модели</strong>.
+            Если при локальном LM Studio ответ игнорирует часть длинной статьи — увеличьте{' '}
+            <strong className="font-medium text-app">Context length</strong> у модели на сервере: входной промпт с
+            текстами статей может обрезаться без явной ошибки.
           </p>
+
+          <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Режим запроса">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setQuickMode('single')
+                setWarn(null)
+              }}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                quickMode === 'single'
+                  ? 'bg-accent/30 text-white ring-1 ring-accent/50'
+                  : 'border border-white/10 text-app-muted hover:bg-white/[0.06] hover:text-white'
+              }`}
+            >
+              Один вопрос
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setQuickMode('chat')
+                setWarn(null)
+              }}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                quickMode === 'chat'
+                  ? 'bg-accent/30 text-white ring-1 ring-accent/50'
+                  : 'border border-white/10 text-app-muted hover:bg-white/[0.06] hover:text-white'
+              }`}
+            >
+              Диалог
+            </button>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-app-muted">
+            {quickMode === 'single' ? (
+              <>Один запрос по тексту ниже — как раньше.</>
+            ) : (
+              <>
+                Диалоги сохраняются в локальной базе на этом компьютере — можно открыть прошлый диалог из списка и
+                продолжить переписку. На каждый ответ заново подбираются фрагменты статей (последние реплики учитываются при
+                поиске).
+              </>
+            )}
+          </p>
+
+          {quickMode === 'chat' && (
+            <div className="mt-4 space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+              <span className="text-xs font-medium text-app-muted">Сохранённые диалоги</span>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                <SavedChatPicker
+                  savedChats={savedChats}
+                  activeId={activeConversationId}
+                  busy={busy}
+                  onSelect={(id) => void loadConversation(id)}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => beginNewChat()}
+                    className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-white hover:bg-white/[0.06] disabled:opacity-40"
+                  >
+                    Новый чат
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !activeConversationId}
+                    onClick={() => void renameSavedConversation()}
+                    className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-app-muted hover:bg-white/[0.06] hover:text-white disabled:opacity-40"
+                  >
+                    Переименовать
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !activeConversationId}
+                    onClick={() => openDeleteSavedConversationDialog()}
+                    className="rounded-lg border border-red-400/25 px-3 py-2 text-xs font-medium text-red-200/95 hover:bg-red-500/15 disabled:opacity-40"
+                  >
+                    Удалить из истории
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <label className="mt-3 block">
             <span className="text-xs font-medium text-app-muted">Агент</span>
             <select
@@ -1357,33 +2469,192 @@ export function AiPage(): JSX.Element {
               ))}
             </select>
           </label>
-          <textarea
-            className="mt-3 min-h-[100px] w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2.5 text-sm text-white"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void ask()}
-            className="mt-3 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-dim disabled:opacity-40"
-          >
-            {busy ? 'Отправка…' : 'Отправить вопрос'}
-          </button>
-          {warn && (
-            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{warn}</div>
-          )}
-          {out && (
-            <div className="mt-4">
-              <p className="mb-2 text-xs font-medium text-app-muted">Ответ</p>
-              <div className="lex-ai-answer-scroll min-h-[10rem] max-h-[min(72vh,640px)] overflow-y-auto break-words rounded-xl border border-white/[0.08] bg-surface-raised/90 p-4">
-                <AiAnswerRich text={out} citations={citations} />
-                <AiCitationFooter citations={citations} />
+
+          {quickMode === 'single' ? (
+            <>
+              <textarea
+                className="mt-3 min-h-[100px] w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2.5 text-sm text-white"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void ask()}
+                className="mt-3 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-dim disabled:opacity-40"
+              >
+                {busy ? 'Отправка…' : 'Отправить вопрос'}
+              </button>
+              {out && (
+                <div className="mt-4">
+                  <p className="mb-2 text-xs font-medium text-app-muted">Ответ</p>
+                  <div className="lex-ai-answer-scroll min-h-[10rem] max-h-[min(72vh,640px)] overflow-y-auto break-words rounded-xl border border-white/[0.08] bg-surface-raised/90 p-4">
+                    <AiAnswerRich text={out} citations={citations} />
+                    <AiCitationFooter citations={citations} />
+                    <AiRetrievalPanel retrieved={retrieved} pipeline={pipelineReport ?? undefined} />
+                    {completionNotice?.trim() ? (
+                      <AiProviderNoticeBar>{completionNotice.trim()}</AiProviderNoticeBar>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div
+                ref={chatScrollRef}
+                className="lex-ai-answer-scroll mt-3 flex min-h-[12rem] max-h-[min(50vh,420px)] flex-col gap-3 overflow-y-auto rounded-xl border border-white/[0.08] bg-surface-raised/90 p-3 sm:p-4"
+              >
+                {chatMessages.length === 0 ? (
+                  <p className="text-center text-xs text-app-muted">
+                    Напишите сообщение — ответ опирается на статьи из вашей импортированной базы.
+                  </p>
+                ) : (
+                  chatMessages.map((m) =>
+                    m.role === 'user' ? (
+                      <div key={m.id} className="ml-6 flex justify-end">
+                        <div className="max-w-[95%] rounded-xl border border-white/[0.08] bg-white/[0.08] px-3 py-2 text-sm leading-relaxed text-white">
+                          <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={m.id} className="mr-4 border-b border-white/[0.06] pb-3 last:border-0 last:pb-0">
+                        <AiAnswerRich text={m.content} citations={m.citations ?? []} />
+                        <AiCitationFooter citations={m.citations ?? []} />
+                        <AiRetrievalPanel retrieved={m.retrieved} pipeline={m.pipeline} />
+                        {m.notice?.trim() ? <AiProviderNoticeBar>{m.notice.trim()}</AiProviderNoticeBar> : null}
+                      </div>
+                    )
+                  )
+                )}
               </div>
+              {chatPinnedHits.length > 0 && (
+                <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+                  <p className="text-[11px] font-medium text-app-muted">
+                    Закреплено в диалоге{' '}
+                    <span className="text-app-muted/80">
+                      ({chatPinnedHits.length}) — статьи автоматически подмешиваются в контекст следующих ответов
+                    </span>
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {chatPinnedHits.map((c) => (
+                      <span
+                        key={c.articleId}
+                        className="group inline-flex max-w-[18rem] items-center gap-1 rounded border border-accent/35 bg-accent/15 px-2 py-0.5 text-[11px] text-accent"
+                      >
+                        <button
+                          type="button"
+                          title={`${c.documentTitle}\n${c.excerpt ?? ''}`.trim()}
+                          onClick={() => void window.lawHelper.openReader(c.documentId, c.articleId)}
+                          className="truncate text-left hover:underline"
+                        >
+                          {c.articleLabel}
+                        </button>
+                        <button
+                          type="button"
+                          title="Снять закреп — статья не будет подмешиваться в следующий запрос"
+                          onClick={() =>
+                            setExcludedPinIds((prev) => {
+                              const next = new Set(prev)
+                              next.add(c.articleId)
+                              return next
+                            })
+                          }
+                          className="text-app-muted hover:text-white"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <textarea
+                ref={chatInputRef}
+                className="mt-3 min-h-[88px] w-full rounded-lg border border-white/10 bg-surface-raised px-3 py-2.5 text-sm text-white"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Сообщение… Enter — отправить, Shift+Enter — новая строка"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    void sendChat()
+                  }
+                }}
+              />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busy || !chatInput.trim()}
+                  onClick={() => void sendChat()}
+                  className="rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-dim disabled:opacity-40"
+                >
+                  {busy ? 'Отправка…' : 'Отправить'}
+                </button>
+                {excludedPinIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setExcludedPinIds(new Set())}
+                    className="rounded-lg border border-white/10 px-3 py-2.5 text-xs text-app-muted hover:bg-white/[0.06] hover:text-white"
+                    title="Вернуть в контекст автоматически закреплённые статьи"
+                  >
+                    Снова закрепить ({excludedPinIds.size})
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          {warn && (
+            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              {warn}
             </div>
           )}
         </div>
       )}
     </div>
+
+    {deleteConfirmOpen && (
+      <div
+        className="fixed inset-0 z-[160] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]"
+        role="presentation"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget && !deleteConfirmBusy) setDeleteConfirmOpen(false)
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ai-delete-dialog-title"
+          className="w-full max-w-md rounded-2xl border border-white/[0.12] bg-[#0f1218] p-5 shadow-2xl"
+        >
+          <h2 id="ai-delete-dialog-title" className="text-base font-semibold text-white">
+            Удалить диалог?
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-app-muted">
+            Диалог будет удалён только с этого компьютера из локальной истории. Продолжить?
+          </p>
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              disabled={deleteConfirmBusy}
+              onClick={() => setDeleteConfirmOpen(false)}
+              className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-app-muted hover:bg-white/[0.06] hover:text-white disabled:opacity-40"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              disabled={deleteConfirmBusy}
+              onClick={() => void confirmDeleteSavedConversation()}
+              className="rounded-lg border border-red-400/35 bg-red-500/15 px-4 py-2.5 text-sm font-medium text-red-100 hover:bg-red-500/25 disabled:opacity-40"
+            >
+              {deleteConfirmBusy ? 'Удаление…' : 'Удалить'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }

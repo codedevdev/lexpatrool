@@ -122,6 +122,17 @@ const ovScroll = 'lex-overlay-scroll'
 
 /** Компакт — мало места; чтение — крупнее текст при узком заголовке; панель — поиск и все опции. */
 export type OverlayLayoutPreset = 'compact' | 'reading' | 'full'
+type OverlayArticleListMode = 'cards' | 'dense'
+type OverlayInteractionMode = 'game' | 'interactive'
+type OverlayUiPrefs = {
+  layoutPreset?: OverlayLayoutPreset
+  opacity?: number
+  focusMode?: boolean
+  fontScale?: number
+  toolsExpanded?: boolean
+  cheatSheetMode?: boolean
+  articleListMode?: OverlayArticleListMode
+}
 
 function isChromeCompact(preset: OverlayLayoutPreset): boolean {
   return preset === 'compact' || preset === 'reading'
@@ -200,11 +211,240 @@ function MouseModeRow({
   )
 }
 
+function OverlayInteractionModeRow({
+  mode,
+  onChange,
+  variant
+}: {
+  mode: OverlayInteractionMode
+  onChange: (mode: OverlayInteractionMode) => void
+  variant: 'compact' | 'full'
+}): JSX.Element {
+  const btnPad = variant === 'compact' ? 'px-2 py-1 text-[9px]' : 'px-2 py-1.5 text-[10px]'
+  const showHint = variant === 'full'
+  return (
+    <div
+      className={variant === 'compact' ? 'mt-1.5' : 'mt-2 space-y-1'}
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+    >
+      <div className="flex rounded-lg border border-white/10 bg-black/35 p-0.5 shadow-inner">
+        <button
+          type="button"
+          title="Показывать без захвата фокуса, чтобы игра продолжала получать ввод"
+          className={`flex-1 rounded-md font-semibold transition ${btnPad} ${
+            mode === 'game'
+              ? 'bg-emerald-500/25 text-emerald-50 shadow-[0_0_0_1px_rgba(52,211,153,0.35)]'
+              : 'text-white/45 hover:bg-white/[0.06] hover:text-white/80'
+          }`}
+          onClick={() => onChange('game')}
+        >
+          Игровой
+        </button>
+        <button
+          type="button"
+          title="Оверлей будет вести себя как активное окно и сразу принимать клавиатуру"
+          className={`flex-1 rounded-md font-semibold transition ${btnPad} ${
+            mode === 'interactive'
+              ? 'bg-accent/30 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
+              : 'text-white/45 hover:bg-white/[0.06] hover:text-white/80'
+          }`}
+          onClick={() => onChange('interactive')}
+        >
+          Интерактивный
+        </button>
+      </div>
+      {showHint ? (
+        <p className="px-0.5 text-[9px] leading-snug text-app-muted">
+          {mode === 'game'
+            ? 'Показ без фокуса; поиск открывает ввод отдельно.'
+            : 'Оверлей получает фокус при показе.'}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function OverlayStatusStrip({
+  clickThrough,
+  mode,
+  hotkeyMouse,
+  hotkeyToggle,
+  compact
+}: {
+  clickThrough: boolean
+  mode: OverlayInteractionMode
+  hotkeyMouse: string
+  hotkeyToggle: string
+  compact: boolean
+}): JSX.Element {
+  return (
+    <div
+      className={`mt-1.5 flex flex-wrap items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/25 ${
+        compact ? 'px-2 py-1 text-[9px]' : 'px-2.5 py-1.5 text-[10px]'
+      } text-white/55`}
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+    >
+      <span
+        className={`rounded-full px-2 py-0.5 font-semibold ${
+          clickThrough ? 'bg-emerald-500/15 text-emerald-100' : 'bg-accent/15 text-accent'
+        }`}
+      >
+        Мышь: {clickThrough ? 'в игру' : 'в оверлей'}
+      </span>
+      <span className="rounded-full bg-white/[0.05] px-2 py-0.5">
+        Показ: {mode === 'game' ? 'без фокуса' : 'с фокусом'}
+      </span>
+      <span className="min-w-0 truncate">
+        Вернуть мышь: <span className="font-mono text-white/70">{hotkeyMouse}</span>
+      </span>
+      <span className="min-w-0 truncate">
+        Открыть/скрыть: <span className="font-mono text-white/70">{hotkeyToggle}</span>
+      </span>
+    </div>
+  )
+}
+
+function ArticleRail({
+  pins,
+  activeId,
+  onSelect
+}: {
+  pins: Pinned[]
+  activeId: string | null
+  onSelect: (pin: Pinned, index: number) => void
+}): JSX.Element {
+  return (
+    <aside className={`mr-1 flex w-10 shrink-0 flex-col gap-1 overflow-y-auto rounded-xl border border-white/[0.08] bg-black/30 p-1 sm:mr-1.5 sm:w-12 ${ovScroll}`}>
+      {pins.map((p, i) => {
+        const active = p.id === activeId
+        return (
+          <button
+            key={p.id}
+            type="button"
+            title={articleDisplayTitle(p.article_number, p.heading)}
+            onClick={() => onSelect(p, i)}
+            className={`group flex h-9 w-full items-center justify-center rounded-lg border text-[9px] font-semibold transition ${
+              active
+                ? 'border-accent/45 bg-accent/25 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.25)]'
+                : 'border-white/[0.07] bg-white/[0.04] text-white/50 hover:border-white/18 hover:bg-white/[0.08] hover:text-white'
+            }`}
+          >
+            <span className="max-w-[2.2rem] truncate font-mono">{p.article_number?.trim() || i + 1}</span>
+          </button>
+        )
+      })}
+    </aside>
+  )
+}
+
+function OverlayPositionControl(): JSX.Element {
+  const items: Array<{ id: Parameters<typeof window.lawHelper.overlay.dock>[0]; label: string; title: string }> = [
+    { id: 'compact-top-right', label: 'Авто', title: 'Компактно в правом верхнем углу' },
+    { id: 'wide-right', label: 'Справа+', title: 'Широкая панель справа для большого списка' },
+    { id: 'top-left', label: 'СВ', title: 'Левый верхний угол' },
+    { id: 'top-right', label: 'СЗ', title: 'Правый верхний угол' },
+    { id: 'bottom-left', label: 'НЛ', title: 'Левый нижний угол' },
+    { id: 'bottom-right', label: 'НП', title: 'Правый нижний угол' }
+  ]
+  return (
+    <div className="min-w-0">
+      <div className="text-[9px] font-medium uppercase tracking-wide text-white/45">Положение окна</div>
+      <div className="mt-1 grid grid-cols-3 gap-1">
+        {items.map((it) => (
+          <button
+            key={it.id}
+            type="button"
+            title={it.title}
+            onClick={() => void window.lawHelper.overlay.dock(it.id)}
+            className="min-w-0 rounded-lg border border-white/10 bg-black/35 px-1.5 py-1.5 text-[9px] font-semibold text-white/62 transition hover:border-accent/30 hover:bg-accent/10 hover:text-white sm:px-2 sm:text-[10px]"
+          >
+            {it.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-[9px] leading-snug text-white/42">
+        «Авто» — компактный угол; «Справа+» — длинный список.
+      </p>
+    </div>
+  )
+}
+
+function DensePinnedList({
+  pins,
+  focusMode,
+  selectedId,
+  onOpen,
+  onMove,
+  onUnpin
+}: {
+  pins: Pinned[]
+  focusMode: boolean
+  selectedId: string | null
+  onOpen: (pin: Pinned, index: number) => void
+  onMove: (index: number, dir: -1 | 1) => void
+  onUnpin: (id: string) => void
+}): JSX.Element {
+  return (
+    <ul className="flex flex-col gap-1">
+      {pins.map((p, i) => {
+        const pen = previewPenalty(p)
+        const active = p.id === selectedId
+        return (
+          <li
+            key={p.id}
+            className={`overflow-hidden rounded-lg border bg-black/24 transition ${
+              active ? 'border-accent/40 bg-accent/[0.08]' : 'border-white/[0.08] hover:border-accent/25 hover:bg-white/[0.03]'
+            }`}
+          >
+            <div className="flex min-w-0 items-center gap-2 px-2 py-1.5">
+              <button
+                type="button"
+                title="Открыть статью в оверлее"
+                onClick={() => onOpen(p, i)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 rounded-md bg-accent/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-accent">
+                    {p.article_number ?? i + 1}
+                  </span>
+                  <span className="truncate text-[10px] font-medium text-white/90">
+                    {articleDisplayTitle(p.article_number, p.heading)}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate text-[9px] text-white/45">
+                  {focusMode && pen !== '—' ? pen : previewEssenceLine(p)}
+                </p>
+              </button>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <MiniBtn onClick={() => onMove(i, -1)} disabled={i === 0} title="Выше">
+                  ↑
+                </MiniBtn>
+                <MiniBtn onClick={() => onMove(i, 1)} disabled={i === pins.length - 1} title="Ниже">
+                  ↓
+                </MiniBtn>
+                <button
+                  type="button"
+                  className="rounded px-1.5 text-[10px] text-red-400/85 hover:bg-red-500/10"
+                  onClick={() => onUnpin(p.id)}
+                  title="Снять с закрепа"
+                >
+                  ⊗
+                </button>
+              </div>
+            </div>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 export function OverlayPage(): JSX.Element {
   const [pins, setPins] = useState<Pinned[]>([])
   const [idx, setIdx] = useState(0)
   const [opacity, setOpacity] = useState(0.94)
   const [clickThrough, setClickThrough] = useState(false)
+  const [overlayInteractionMode, setOverlayInteractionMode] = useState<OverlayInteractionMode>('game')
   const [filterLocal, setFilterLocal] = useState('')
   const [globalQ, setGlobalQ] = useState('')
   const debouncedGlobal = useDebounced(globalQ, 280)
@@ -216,6 +456,7 @@ export function OverlayPage(): JSX.Element {
   const [focusMode, setFocusMode] = useState(false)
   const [fontScale, setFontScale] = useState(1)
   const [toolsExpanded, setToolsExpanded] = useState(true)
+  const [articleListMode, setArticleListMode] = useState<OverlayArticleListMode>('cards')
   const [hkDisp, setHkDisp] = useState({
     toggle: 'Ctrl+Shift+Space',
     search: 'Ctrl+Shift+F',
@@ -250,10 +491,11 @@ export function OverlayPage(): JSX.Element {
 
   useEffect(() => {
     void (async () => {
-      const [opRaw, ctRaw, raw] = await Promise.all([
+      const [opRaw, ctRaw, raw, interactionMode] = await Promise.all([
         window.lawHelper.settings.get('overlay_opacity'),
         window.lawHelper.settings.get('overlay_click_through'),
-        window.lawHelper.settings.get(UI_KEY)
+        window.lawHelper.settings.get(UI_KEY),
+        window.lawHelper.overlay.getInteractionMode()
       ])
       if (ctRaw === '1' || ctRaw === '0') setClickThrough(ctRaw === '1')
       let nextOpacity = 0.94
@@ -263,15 +505,7 @@ export function OverlayPage(): JSX.Element {
       }
       if (raw) {
         try {
-          const j = JSON.parse(raw) as {
-            layoutPreset?: OverlayLayoutPreset
-            opacity?: number
-            compact?: boolean
-            focusMode?: boolean
-            fontScale?: number
-            toolsExpanded?: boolean
-            cheatSheetMode?: boolean
-          }
+          const j = JSON.parse(raw) as OverlayUiPrefs & { compact?: boolean }
           if (j.layoutPreset === 'compact' || j.layoutPreset === 'reading' || j.layoutPreset === 'full') {
             setLayoutPreset(j.layoutPreset)
           } else if (typeof j.compact === 'boolean') {
@@ -282,6 +516,7 @@ export function OverlayPage(): JSX.Element {
           if (typeof j.fontScale === 'number') setFontScale(j.fontScale)
           if (typeof j.toolsExpanded === 'boolean') setToolsExpanded(j.toolsExpanded)
           if (typeof j.cheatSheetMode === 'boolean') setCheatSheetMode(j.cheatSheetMode)
+          if (j.articleListMode === 'cards' || j.articleListMode === 'dense') setArticleListMode(j.articleListMode)
         } catch {
           /* ignore */
         }
@@ -289,7 +524,13 @@ export function OverlayPage(): JSX.Element {
       setOpacity(Math.min(1, Math.max(0.28, nextOpacity)))
       const fromMain = await window.lawHelper.overlay.getClickThrough()
       setClickThrough(fromMain)
+      setOverlayInteractionMode(interactionMode)
     })()
+  }, [])
+
+  const changeOverlayInteractionMode = useCallback((mode: OverlayInteractionMode): void => {
+    setOverlayInteractionMode(mode)
+    void window.lawHelper.overlay.setInteractionMode(mode)
   }, [])
 
   useEffect(() => {
@@ -298,12 +539,27 @@ export function OverlayPage(): JSX.Element {
   }, [])
 
   useEffect(() => {
+    const off = window.lawHelper.overlay.onApplyUiPrefs((prefs) => {
+      if (prefs.layoutPreset === 'compact' || prefs.layoutPreset === 'reading' || prefs.layoutPreset === 'full') {
+        setLayoutPreset(prefs.layoutPreset)
+      }
+      if (typeof prefs.opacity === 'number') setOpacity(Math.min(1, Math.max(0.28, prefs.opacity)))
+      if (typeof prefs.focusMode === 'boolean') setFocusMode(prefs.focusMode)
+      if (typeof prefs.fontScale === 'number') setFontScale(Math.min(1.35, Math.max(0.86, prefs.fontScale)))
+      if (typeof prefs.toolsExpanded === 'boolean') setToolsExpanded(prefs.toolsExpanded)
+      if (typeof prefs.cheatSheetMode === 'boolean') setCheatSheetMode(prefs.cheatSheetMode)
+      if (prefs.articleListMode === 'cards' || prefs.articleListMode === 'dense') setArticleListMode(prefs.articleListMode)
+    })
+    return () => off()
+  }, [])
+
+  useEffect(() => {
     void window.lawHelper.settings.set(
       UI_KEY,
-      JSON.stringify({ opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode })
+      JSON.stringify({ opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode, articleListMode })
     )
     void window.lawHelper.settings.set('overlay_opacity', String(opacity))
-  }, [opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode])
+  }, [opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode, articleListMode])
 
   useEffect(() => {
     void refresh()
@@ -412,6 +668,21 @@ export function OverlayPage(): JSX.Element {
   )
 
   const activeDetailArticle = searchArticle ?? detailPin
+  const selectedPinnedId = detailPin?.id ?? current?.id ?? null
+  const showArticleRail = pins.length >= 4 && !searchArticle
+
+  const openPinnedInOverlay = useCallback(
+    (pin: Pinned, index: number): void => {
+      setSearchArticle(null)
+      setIdx(index)
+      if (cheatSheetMode) {
+        setDetailId(pin.id)
+      } else {
+        setDetailId(null)
+      }
+    },
+    [cheatSheetMode]
+  )
 
   const bodyDisplay = useMemo(() => {
     if (!current) return ''
@@ -503,6 +774,9 @@ export function OverlayPage(): JSX.Element {
                 >
                   Панель
                 </button>
+                <ToolBtn title="Авто-позиция: компактно справа сверху" onClick={() => void window.lawHelper.overlay.dock('compact-top-right')}>
+                  Авто
+                </ToolBtn>
                 <ToolBtn title="Поверх всех окон" onClick={() => void window.lawHelper.overlay.raise()}>
                   ⧈
                 </ToolBtn>
@@ -527,6 +801,18 @@ export function OverlayPage(): JSX.Element {
               variant="compact"
               hotkeyMouse={hkDisp.clickThrough}
             />
+            <OverlayInteractionModeRow
+              mode={overlayInteractionMode}
+              onChange={changeOverlayInteractionMode}
+              variant="compact"
+            />
+            <OverlayStatusStrip
+              clickThrough={clickThrough}
+              mode={overlayInteractionMode}
+              hotkeyMouse={hkDisp.clickThrough}
+              hotkeyToggle={hkDisp.toggle}
+              compact
+            />
           </>
         ) : (
           <>
@@ -540,6 +826,9 @@ export function OverlayPage(): JSX.Element {
                 className="flex shrink-0 flex-wrap items-center justify-end gap-1"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
+                <ToolBtn title="Авто-позиция: компактно справа сверху" onClick={() => void window.lawHelper.overlay.dock('compact-top-right')}>
+                  Авто
+                </ToolBtn>
                 <ToolBtn title="Поверх всех окон" onClick={() => void window.lawHelper.overlay.raise()}>
                   ⧈
                 </ToolBtn>
@@ -564,6 +853,18 @@ export function OverlayPage(): JSX.Element {
               onGame={() => setClickThrough(true)}
               variant="full"
               hotkeyMouse={hkDisp.clickThrough}
+            />
+            <OverlayInteractionModeRow
+              mode={overlayInteractionMode}
+              onChange={changeOverlayInteractionMode}
+              variant="full"
+            />
+            <OverlayStatusStrip
+              clickThrough={clickThrough}
+              mode={overlayInteractionMode}
+              hotkeyMouse={hkDisp.clickThrough}
+              hotkeyToggle={hkDisp.toggle}
+              compact={false}
             />
 
             {/* Global search */}
@@ -652,18 +953,36 @@ export function OverlayPage(): JSX.Element {
 
             <div>
               <div className="text-[9px] font-medium uppercase tracking-wide text-white/45">Режим закрепов</div>
-              <div className="mt-1 flex rounded-lg border border-white/10 bg-black/40 p-0.5">
+              <div className="mt-1 grid grid-cols-3 rounded-lg border border-white/10 bg-black/40 p-0.5">
                 <button
                   type="button"
                   title="Список карточек (суть, залог, наказание) и детали по клику"
-                  onClick={() => setCheatSheetMode(true)}
+                  onClick={() => {
+                    setCheatSheetMode(true)
+                    setArticleListMode('cards')
+                  }}
                   className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
-                    cheatSheetMode
+                    cheatSheetMode && articleListMode === 'cards'
                       ? 'bg-accent/35 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
                       : 'text-white/50 hover:bg-white/[0.06] hover:text-white/85'
                   }`}
                 >
                   Карточки
+                </button>
+                <button
+                  type="button"
+                  title="Плотный список как каналы/сообщения: больше статей на экране"
+                  onClick={() => {
+                    setCheatSheetMode(true)
+                    setArticleListMode('dense')
+                  }}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
+                    cheatSheetMode && articleListMode === 'dense'
+                      ? 'bg-accent/35 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
+                      : 'text-white/50 hover:bg-white/[0.06] hover:text-white/85'
+                  }`}
+                >
+                  Список
                 </button>
                 <button
                   type="button"
@@ -679,7 +998,11 @@ export function OverlayPage(): JSX.Element {
                 </button>
               </div>
               <p className="mt-1 text-[9px] leading-snug text-white/42">
-                {cheatSheetMode ? (
+                {cheatSheetMode && articleListMode === 'dense' ? (
+                  <>
+                    Плотный список удобен, когда закрепов много: больше строк на экране, быстрый выбор слева и сортировка рядом.
+                  </>
+                ) : cheatSheetMode ? (
                   <>
                     Обзор по карточкам, полный текст в окне деталей. Переключение между статьями —{' '}
                     <span className="text-white/55">в списке или чипах на карточке</span> (стрелки клавиатуры здесь не
@@ -694,18 +1017,23 @@ export function OverlayPage(): JSX.Element {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-white/[0.05] pt-2">
-              <LayoutPresetControl value={layoutPreset} onChange={setLayoutPreset} />
-              <OverlayOptionToggle
-                label="Фокус"
-                hint="Карточки: превью и чип про санкции. Детали: без блока «Залог», тело — по строкам санкций. «Читать»: то же для текста."
-                checked={focusMode}
-                onChange={setFocusMode}
-              />
+            <div className="grid grid-cols-1 gap-2 border-t border-white/[0.05] pt-2 min-[520px]:grid-cols-2">
+              <div className="min-w-0">
+                <LayoutPresetControl value={layoutPreset} onChange={setLayoutPreset} />
+              </div>
+              <OverlayPositionControl />
+              <div className="min-w-0 min-[520px]:col-span-2">
+                <OverlayOptionToggle
+                  label="Фокус"
+                  hint="Короче превью и текст санкций. Детали становятся плотнее."
+                  checked={focusMode}
+                  onChange={setFocusMode}
+                />
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-white/[0.05] pt-2">
-              <label className="flex items-center gap-1.5 text-[10px] text-app-muted">
+            <div className="grid grid-cols-2 gap-2 border-t border-white/[0.05] pt-2">
+              <label className="flex min-w-0 items-center gap-1.5 text-[10px] text-app-muted">
                 <span className="text-white/50">A</span>
                 <input
                   type="range"
@@ -714,10 +1042,10 @@ export function OverlayPage(): JSX.Element {
                   step={0.05}
                   value={fontScale}
                   onChange={(e) => setFontScale(Number(e.target.value))}
-                  className="h-1 w-20 accent-accent"
+                  className="h-1 min-w-0 flex-1 accent-accent"
                 />
               </label>
-              <label className="flex items-center gap-1.5 text-[10px] text-app-muted">
+              <label className="flex min-w-0 items-center gap-1.5 text-[10px] text-app-muted">
                 <span className="text-white/50">◐</span>
                 <input
                   type="range"
@@ -726,7 +1054,7 @@ export function OverlayPage(): JSX.Element {
                   step={0.01}
                   value={opacity}
                   onChange={(e) => setOpacity(Number(e.target.value))}
-                  className="h-1 w-24 accent-accent"
+                  className="h-1 min-w-0 flex-1 accent-accent"
                 />
               </label>
             </div>
@@ -751,6 +1079,9 @@ export function OverlayPage(): JSX.Element {
         }`}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        {showArticleRail ? (
+          <ArticleRail pins={pins} activeId={selectedPinnedId} onSelect={openPinnedInOverlay} />
+        ) : null}
         <section className="min-h-0 w-full flex-1 overflow-hidden">
           {pins.length === 0 && !searchArticle ? (
             <div className="flex h-full flex-col justify-center rounded-xl border border-dashed border-white/15 bg-black/20 p-6 text-center">
@@ -802,6 +1133,22 @@ export function OverlayPage(): JSX.Element {
               >
                 {filteredPins.length === 0 ? (
                   <p className="p-4 text-center text-[11px] text-white/50">Нет совпадений по фильтру.</p>
+                ) : articleListMode === 'dense' ? (
+                  <DensePinnedList
+                    pins={filteredPins}
+                    focusMode={focusMode}
+                    selectedId={selectedPinnedId}
+                    onOpen={(pin) => {
+                      const sourceIndex = pins.findIndex((p) => p.id === pin.id)
+                      openPinnedInOverlay(pin, sourceIndex >= 0 ? sourceIndex : 0)
+                    }}
+                    onMove={(i, dir) => {
+                      const pin = filteredPins[i]
+                      const sourceIndex = pin ? pins.findIndex((p) => p.id === pin.id) : -1
+                      if (sourceIndex >= 0) void movePin(sourceIndex, dir)
+                    }}
+                    onUnpin={(id) => void unpin(id)}
+                  />
                 ) : (
                   <ul
                     className={`flex flex-col ${
@@ -827,8 +1174,7 @@ export function OverlayPage(): JSX.Element {
                             <button
                               type="button"
                               onClick={() => {
-                                setSearchArticle(null)
-                                setDetailId(p.id)
+                                openPinnedInOverlay(p, i >= 0 ? i : 0)
                               }}
                               className={`group w-full text-left ${
                                 chromeCompact
@@ -1001,8 +1347,8 @@ export function OverlayPage(): JSX.Element {
       >
         {chromeCompact ? (
           <>
-            <span className="text-white/55">⌨</span> «Панель» — поиск и настройки · ◀▶⤢ — позиция окна · {hkDisp.search}{' '}
-            — то же · {hkDisp.clickThrough} — мышь · Esc — скрыть
+            <span className="text-white/55">⌨</span> «Панель» — поиск и настройки · «Авто» — красивый угол · боковая лента —
+            быстрый выбор · {hkDisp.search} — поиск · {hkDisp.clickThrough} — мышь · Esc — скрыть
           </>
         ) : (
           <>
@@ -1022,7 +1368,8 @@ export function OverlayPage(): JSX.Element {
             {' '}
             · Esc — из деталей или скрыть окно
             <span className="mt-1 block text-white/35">
-              Отдельные окна: {hkDisp.cheatsOverlay} — шпаргалки · {hkDisp.collectionsOverlay} — подборки
+              «Список» и боковая лента удобны для большого числа закрепов. Отдельные окна: {hkDisp.cheatsOverlay} —
+              шпаргалки · {hkDisp.collectionsOverlay} — подборки
             </span>
           </>
         )}
@@ -1267,7 +1614,7 @@ function LayoutPresetControl({
     { id: 'full', label: 'Панель', title: 'Поиск по базе, фильтры и все переключатели' }
   ]
   return (
-    <div className="min-w-0 flex-1 sm:max-w-lg">
+    <div className="min-w-0">
       <div className="text-[9px] font-medium uppercase tracking-wide text-white/45">Режим окна</div>
       <div className="mt-1 flex rounded-lg border border-white/10 bg-black/40 p-0.5">
         {items.map((it) => (
@@ -1287,7 +1634,7 @@ function LayoutPresetControl({
         ))}
       </div>
       <p className="mt-1 text-[9px] leading-snug text-white/42">
-        Для игры часто удобнее «Чтение»: меньше отвлекает шапка, текст крупнее. Горячая клавиша поиска открывает полную панель.
+        «Чтение» — меньше шапка и крупнее текст. Поиск открывает полную панель.
       </p>
     </div>
   )
@@ -1306,10 +1653,10 @@ function OverlayOptionToggle({
   onChange: (v: boolean) => void
 }): JSX.Element {
   return (
-    <label className="flex max-w-[220px] cursor-pointer gap-2">
+    <label className="flex w-full cursor-pointer gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-2 py-1.5">
       <input
         type="checkbox"
-        className="mt-0.5 accent-accent"
+        className="mt-0.5 shrink-0 accent-accent"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />

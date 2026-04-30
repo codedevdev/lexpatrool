@@ -1,6 +1,8 @@
 /** Общая токенизация для FTS и UI (кириллица/латиница, цифры). */
 
-const MAX_TOKENS = 16
+import { expandLegalCodeAbbrevTokens } from './legal-code-abbrev'
+
+const MAX_TOKENS = 24
 
 /**
  * Слова из запроса: пробелы, минимум 2 символа, без пунктуации по краям.
@@ -15,10 +17,18 @@ export function extractSearchTokens(query: string): string[] {
   for (const part of parts) {
     const cleaned = part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
     if (cleaned.length >= 2) out.push(cleaned)
+    // Одна цифра (например «8» в «статья 8») иначе отбрасывается — без неё FTS не находит статью по номеру.
+    else if (/^\d+$/.test(cleaned) && cleaned.length >= 1) out.push(cleaned)
+  }
+
+  // Номера вида 8.1, 12.3 — если стоят отдельно или с пунктуацией.
+  for (const m of trimmed.match(/\d+(?:\.\d+)*/gu) ?? []) {
+    if (!out.includes(m)) out.push(m)
   }
 
   const uniq = [...new Set(out)]
-  return uniq.slice(0, MAX_TOKENS)
+  const expanded = expandLegalCodeAbbrevTokens(uniq)
+  return expanded.slice(0, MAX_TOKENS)
 }
 
 /**

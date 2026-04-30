@@ -1,42 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { articleDisplayTitle } from '@shared/article-display'
-
-type CollectionRow = {
-  id: string
-  name: string
-  description: string | null
-  sort_order: number
-  article_count?: number
-}
-
-type CollArticle = {
-  id: string
-  heading: string
-  article_number: string | null
-  document_id: string
-  document_title: string
-}
-
-type SearchHit = {
-  article_id: string
-  document_id: string
-  document_title: string
-  heading: string
-  snippet: string
-}
+import type {
+  ArticleCollectionRecord,
+  BookmarkArticleRecord,
+  CollectionArticleRecord,
+  SearchHit
+} from '@shared/types'
 
 export function CollectionDetailPage(): JSX.Element {
   const { collectionId } = useParams<{ collectionId: string }>()
   const cid = collectionId?.trim() ?? ''
 
-  const [meta, setMeta] = useState<CollectionRow | null>(null)
-  const [articles, setArticles] = useState<CollArticle[]>([])
+  const [meta, setMeta] = useState<ArticleCollectionRecord | null>(null)
+  const [articles, setArticles] = useState<CollectionArticleRecord[]>([])
+  const [bookmarks, setBookmarks] = useState<BookmarkArticleRecord[]>([])
   const [loadAttempted, setLoadAttempted] = useState(false)
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
   const [ftsQuery, setFtsQuery] = useState('')
   const [hint, setHint] = useState<string | null>(null)
+  const [articleFilter, setArticleFilter] = useState('')
+  const [editingMeta, setEditingMeta] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
   const qLive = useRef(q)
   qLive.current = q
 
@@ -48,17 +35,22 @@ export function CollectionDetailPage(): JSX.Element {
       return
     }
     if (!opts?.soft) setLoadAttempted(false)
-    const list = (await window.lawHelper.collections.list()) as CollectionRow[]
+    const list = await window.lawHelper.collections.list()
     const arr = Array.isArray(list) ? list : []
     const m = arr.find((c) => c.id === cid) ?? null
     setMeta(m)
     if (m) {
+      setEditName(m.name)
+      setEditDesc(m.description ?? '')
+    }
+    if (m) {
       const raw = await window.lawHelper.collections.getArticles(cid)
-      const rows = raw as CollArticle[]
-      setArticles(Array.isArray(rows) ? rows : [])
+      setArticles(Array.isArray(raw) ? raw : [])
     } else {
       setArticles([])
     }
+    const bm = await window.lawHelper.bookmarks.list()
+    setBookmarks(Array.isArray(bm) ? bm : [])
     setLoadAttempted(true)
   }, [cid])
 
@@ -114,6 +106,63 @@ export function CollectionDetailPage(): JSX.Element {
     void refreshAll({ soft: true })
   }
 
+  async function addArticleFromBookmark(row: BookmarkArticleRecord): Promise<void> {
+    if (!cid || inCollection(row.article_id)) return
+    const r = await window.lawHelper.collections.addArticle(cid, row.article_id)
+    if (r.ok) {
+      setHint('Статья из закладок добавлена.')
+      void refreshAll({ soft: true })
+    } else {
+      setHint('Не удалось добавить статью из закладок.')
+    }
+  }
+
+  async function saveMeta(): Promise<void> {
+    if (!meta) return
+    const n = editName.trim()
+    if (!n) {
+      setHint('Название подборки не может быть пустым.')
+      return
+    }
+    const r = await window.lawHelper.collections.save({
+      id: meta.id,
+      name: n,
+      description: editDesc.trim() || null,
+      sort_order: meta.sort_order
+    })
+    if (r.ok) {
+      setEditingMeta(false)
+      setHint('Описание подборки обновлено.')
+      void refreshAll({ soft: true })
+    } else {
+      setHint('Не удалось сохранить описание.')
+    }
+  }
+
+  async function moveArticle(articleId: string, direction: -1 | 1): Promise<void> {
+    if (!cid) return
+    const index = articles.findIndex((x) => x.id === articleId)
+    const nextIndex = index + direction
+    if (index < 0 || nextIndex < 0 || nextIndex >= articles.length) return
+    const ids = articles.map((a) => a.id)
+    const tmp = ids[index]!
+    ids[index] = ids[nextIndex]!
+    ids[nextIndex] = tmp
+    const ok = await window.lawHelper.collections.reorderArticles(cid, ids)
+    if (ok) {
+      setArticles((cur) => ids.map((id) => cur.find((a) => a.id === id)).filter((x): x is CollectionArticleRecord => Boolean(x)))
+      setHint('Порядок статей обновлён.')
+    } else {
+      setHint('Не удалось изменить порядок статей.')
+    }
+  }
+
+  const visibleArticles = articles.filter((a) => {
+    const s = articleFilter.trim().toLowerCase()
+    if (!s) return true
+    return `${a.heading}\n${a.article_number ?? ''}\n${a.document_title}`.toLowerCase().includes(s)
+  })
+
   if (!cid) {
     return (
       <div className="space-y-4">
@@ -155,8 +204,26 @@ export function CollectionDetailPage(): JSX.Element {
             <span className="text-white/30"> · </span>
             <span>{meta.name}</span>
           </div>
-          <h1 className="mt-1 text-2xl font-semibold text-white">{meta.name}</h1>
-          {meta.description ? <p className="mt-2 max-w-2xl text-sm text-app-muted">{meta.description}</p> : null}
+          {editingMeta ? (
+            <div className="mt-2 grid max-w-2xl gap-2 sm:grid-cols-2">
+              <input
+                className="rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-sm text-white outline-none focus:border-accent"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
+              <input
+                className="rounded-lg border border-white/10 bg-surface-raised px-3 py-2 text-sm text-white outline-none focus:border-accent"
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                placeholder="Описание"
+              />
+            </div>
+          ) : (
+            <>
+              <h1 className="mt-1 text-2xl font-semibold text-white">{meta.name}</h1>
+              {meta.description ? <p className="mt-2 max-w-2xl text-sm text-app-muted">{meta.description}</p> : null}
+            </>
+          )}
           <p className="mt-2 text-xs text-white/40">
             Статей в подборке: {typeof meta.article_count === 'number' ? meta.article_count : articles.length}
           </p>
@@ -169,6 +236,23 @@ export function CollectionDetailPage(): JSX.Element {
           >
             Окно подборок
           </button>
+          {editingMeta ? (
+            <button
+              type="button"
+              onClick={() => void saveMeta()}
+              className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dim"
+            >
+              Сохранить
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingMeta(true)}
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-app-muted hover:bg-white/5"
+            >
+              Редактировать
+            </button>
+          )}
         </div>
       </header>
 
@@ -230,12 +314,56 @@ export function CollectionDetailPage(): JSX.Element {
       </section>
 
       <section className="glass rounded-2xl p-5">
-        <h2 className="text-sm font-medium text-white">Состав подборки</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-white">Быстро из закладок</h2>
+            <p className="mt-1 text-xs text-app-muted">Полезно, когда сначала отмечаете статьи в читателе, а потом собираете сменную подборку.</p>
+          </div>
+        </div>
+        {bookmarks.length === 0 ? (
+          <p className="mt-3 text-sm text-app-muted">Закладок пока нет.</p>
+        ) : (
+          <ul className="mt-3 grid gap-2 md:grid-cols-2">
+            {bookmarks.slice(0, 8).map((b) => {
+              const already = inCollection(b.article_id)
+              return (
+                <li key={b.id} className="rounded-lg border border-white/5 bg-surface-raised/50 p-3">
+                  <div className="line-clamp-2 text-sm text-white">
+                    {articleDisplayTitle(b.article_number, b.heading)}
+                  </div>
+                  <div className="mt-1 line-clamp-1 text-xs text-app-muted">{b.document_title}</div>
+                  <button
+                    type="button"
+                    disabled={already}
+                    onClick={() => void addArticleFromBookmark(b)}
+                    className="mt-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs text-accent hover:bg-accent/20 disabled:border-white/10 disabled:bg-transparent disabled:text-white/35"
+                  >
+                    {already ? 'Уже в подборке' : 'Добавить'}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="glass rounded-2xl p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-medium text-white">Состав подборки</h2>
+          <input
+            className="w-full rounded-lg border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/40 sm:w-72"
+            placeholder="Фильтр внутри подборки…"
+            value={articleFilter}
+            onChange={(e) => setArticleFilter(e.target.value)}
+          />
+        </div>
         {articles.length === 0 ? (
           <p className="mt-3 text-sm text-app-muted">Пока пусто — добавьте статьи из читателя или через поиск выше.</p>
+        ) : visibleArticles.length === 0 ? (
+          <p className="mt-3 text-sm text-app-muted">В составе нет совпадений по фильтру.</p>
         ) : (
           <ul className="mt-3 divide-y divide-white/5">
-            {articles.map((a) => (
+            {visibleArticles.map((a) => (
               <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <Link
@@ -246,13 +374,31 @@ export function CollectionDetailPage(): JSX.Element {
                   </Link>
                   <div className="text-xs text-app-muted">{a.document_title}</div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void removeArticle(a.id)}
-                  className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-app-muted hover:bg-white/5"
-                >
-                  Убрать из подборки
-                </button>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void moveArticle(a.id, -1)}
+                    disabled={articles.findIndex((x) => x.id === a.id) === 0}
+                    className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-app-muted hover:bg-white/5 disabled:opacity-30"
+                  >
+                    Вверх
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void moveArticle(a.id, 1)}
+                    disabled={articles.findIndex((x) => x.id === a.id) === articles.length - 1}
+                    className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-app-muted hover:bg-white/5 disabled:opacity-30"
+                  >
+                    Вниз
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void removeArticle(a.id)}
+                    className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-app-muted hover:bg-white/5"
+                  >
+                    Убрать
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 
 export type ToolOverlayKind = 'cheats' | 'collections'
 
@@ -43,6 +43,12 @@ export function ToolOverlayFrame({
   footerHint?: string
   children: React.ReactNode
 }): JSX.Element {
+  const [interactionMode, setInteractionMode] = useState<'game' | 'interactive'>('game')
+
+  useEffect(() => {
+    void window.lawHelper.overlay.getInteractionMode().then(setInteractionMode).catch(() => {})
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
@@ -97,7 +103,7 @@ export function ToolOverlayFrame({
       </div>
       {footerHint ? (
         <footer className="shrink-0 border-t border-white/[0.06] bg-black/20 px-2 py-1.5 text-[9px] text-white/40">
-          {footerHint}
+          {footerHint} · показ: {interactionMode === 'game' ? 'без фокуса' : 'с фокусом'}
         </footer>
       ) : null}
     </div>

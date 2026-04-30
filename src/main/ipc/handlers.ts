@@ -22,10 +22,19 @@ import type {
   ReplaceDocumentImportPayload,
   AiProviderConfig,
   AiCompletePayload,
+  AiChatTurnPayload,
+  AiChatCreatePayload,
+  AiChatAppendTurnPayload,
+  AiConversationSummary,
+  AiCitation,
   AiAgentRecord,
+  AiEmbeddingsProgress,
   BrowserImportPayload,
   ManualDomParseRulesV1,
-  ArticleUpdatePayload
+  ArticleUpdatePayload,
+  ArticleCollectionSavePayload,
+  CheatSheetSavePayload,
+  UserNoteSavePayload
 } from '../../shared/types'
 import { extractManualDom } from '../../parsers/manual-dom-extract'
 import { parseHtmlWithReadability } from '../../parsers/readability-import'
@@ -38,17 +47,18 @@ import {
 } from '../../parsers/article-import-filter'
 import { insertArticlesFromSplits, replaceDocumentArticlesFromSplits } from '../article-splits-persist'
 import { retrieveChunksForQuery, snippetForArticleBody } from '../../services/retrieval'
+import { runAiPipeline } from '../../services/ai-pipeline'
 import {
-  buildSystemPrompt,
-  completeChat,
-  parseCitationsFromAnswer,
-  type AiMessage
-} from '../../services/ai-gateway'
-import type { OverlayController } from '../overlay-window'
+  clearEmbeddingsIndex,
+  getEmbeddingsStatus,
+  rebuildArticleEmbeddings
+} from '../../services/embeddings'
+import type { OverlayController, OverlayDockPosition, OverlayInteractionMode } from '../overlay-window'
 import type { ToolOverlayController } from '../tool-overlay-window'
 import {
   applyOverlayGlobalShortcuts,
   DEFAULT_HOTKEYS,
+  getHotkeyRegistrationStatus,
   HOTKEY_FIELDS,
   humanizeAccelerator,
   readHotkeys,
@@ -60,6 +70,76 @@ import { seedIfEmpty } from '../seed'
 import { checkForUpdates, getUpdateRepoLabel } from '../update-check'
 import { LEX_BACKUP_TABLE_ORDER } from '../backup-tables'
 import { parseBackupJson, restoreDatabaseFromBackupData } from '../backup-restore'
+
+/** Ограничение размера истории в теле IPC и в контексте модели (хвост диалога). */
+const AI_CHAT_MAX_HISTORY_MESSAGES = 40
+
+const DEFAULT_AI_CHAT_TITLE = 'Новый диалог'
+const OVERLAY_UI_PREFS_KEY = 'overlay_ui_prefs'
+
+type OverlayAotLevel = 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
+type OverlayArticleListMode = 'cards' | 'dense'
+type OverlayLayoutPreset = 'compact' | 'reading' | 'full'
+
+interface OverlayUiPrefs {
+  opacity?: number
+  layoutPreset?: OverlayLayoutPreset
+  focusMode?: boolean
+  fontScale?: number
+  toolsExpanded?: boolean
+  cheatSheetMode?: boolean
+  articleListMode?: OverlayArticleListMode
+}
+
+const GAME_OVERLAY_PROFILE: {
+  opacity: number
+  clickThrough: boolean
+  aotLevel: OverlayAotLevel
+  interactionMode: OverlayInteractionMode
+  dock: OverlayDockPosition
+  uiPrefs: Required<OverlayUiPrefs>
+} = {
+  opacity: 0.9,
+  clickThrough: true,
+  aotLevel: 'pop-up-menu',
+  interactionMode: 'game',
+  dock: 'compact-top-right',
+  uiPrefs: {
+    opacity: 0.9,
+    layoutPreset: 'compact',
+    focusMode: true,
+    fontScale: 1,
+    toolsExpanded: false,
+    cheatSheetMode: true,
+    articleListMode: 'dense'
+  }
+}
+
+function readOverlayUiPrefs(db: Database): OverlayUiPrefs {
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_UI_PREFS_KEY) as
+    | { value: string }
+    | undefined
+  if (!row?.value) return {}
+  try {
+    const parsed = JSON.parse(row.value) as OverlayUiPrefs
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeSetting(db: Database, key: string, value: string): void {
+  db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
+    key,
+    value
+  )
+}
+
+function deriveConversationTitleFromFirstMessage(text: string): string {
+  const line = text.trim().split(/\r?\n/u)[0]?.trim() ?? ''
+  if (!line) return DEFAULT_AI_CHAT_TITLE
+  return line.length > 80 ? `${line.slice(0, 77)}…` : line
+}
 
 export interface IpcContext {
   getMainWindow: () => ElectronBrowserWindow | null
@@ -116,14 +196,26 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, getDb())
   }
 
-  function broadcastCollectionsChanged(): void {
+  function broadcastRendererEvent(channel: 'collections:changed' | 'cheatSheets:changed' | 'notes:changed'): void {
     for (const w of BrowserWindow.getAllWindows()) {
       try {
-        if (!w.isDestroyed()) w.webContents.send('collections:changed')
+        if (!w.isDestroyed()) w.webContents.send(channel)
       } catch {
         /* ignore */
       }
     }
+  }
+
+  function broadcastCollectionsChanged(): void {
+    broadcastRendererEvent('collections:changed')
+  }
+
+  function broadcastCheatSheetsChanged(): void {
+    broadcastRendererEvent('cheatSheets:changed')
+  }
+
+  function broadcastNotesChanged(): void {
+    broadcastRendererEvent('notes:changed')
   }
 
   ipcMain.handle('app:get-version', async () => {
@@ -233,6 +325,47 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       overlay.setAlwaysOnTopLevel(level as 'off' | 'floating' | 'screen-saver' | 'pop-up-menu')
     }
     return ok
+  })
+
+  ipcMain.handle('overlay:get-interaction-mode', () => overlay.getInteractionMode())
+
+  ipcMain.handle('overlay:set-interaction-mode', (_e, mode: string) => {
+    const ok = mode === 'game' || mode === 'interactive'
+    if (ok) overlay.setInteractionMode(mode as OverlayInteractionMode)
+    return ok
+  })
+
+  ipcMain.handle('overlay:apply-game-profile', () => {
+    const db = getDb()
+    const uiPrefs: OverlayUiPrefs = {
+      ...readOverlayUiPrefs(db),
+      ...GAME_OVERLAY_PROFILE.uiPrefs
+    }
+
+    overlay.setAlwaysOnTopLevel(GAME_OVERLAY_PROFILE.aotLevel)
+    overlay.setInteractionMode(GAME_OVERLAY_PROFILE.interactionMode)
+    overlay.setClickThrough(GAME_OVERLAY_PROFILE.clickThrough)
+    overlay.setOpacity(GAME_OVERLAY_PROFILE.opacity)
+
+    writeSetting(db, 'overlay_click_through', GAME_OVERLAY_PROFILE.clickThrough ? '1' : '0')
+    writeSetting(db, 'overlay_opacity', String(GAME_OVERLAY_PROFILE.opacity))
+    writeSetting(db, OVERLAY_UI_PREFS_KEY, JSON.stringify(uiPrefs))
+
+    overlay.dock(GAME_OVERLAY_PROFILE.dock)
+    overlay.bringToFront()
+    overlay.send('overlay:click-through-changed', GAME_OVERLAY_PROFILE.clickThrough)
+    overlay.send('overlay:apply-ui-prefs', uiPrefs)
+    setTimeout(() => overlay.send('overlay:apply-ui-prefs', uiPrefs), 250)
+
+    return {
+      ok: true as const,
+      opacity: GAME_OVERLAY_PROFILE.opacity,
+      clickThrough: GAME_OVERLAY_PROFILE.clickThrough,
+      aotLevel: GAME_OVERLAY_PROFILE.aotLevel,
+      interactionMode: GAME_OVERLAY_PROFILE.interactionMode,
+      dock: GAME_OVERLAY_PROFILE.dock,
+      uiPrefs
+    }
   })
 
   ipcMain.handle('categories:list', () => {
@@ -621,37 +754,213 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     const db = getDb()
     const { cfg: baseCfg, question: userQuestion, agentId } = payload
     const { cfg, extra } = mergeAgentConfig(db, baseCfg, agentId)
-    const chunks = retrieveChunksForQuery(db, userQuestion, 12, { maxPerDocument: 3 })
-    const sys = buildSystemPrompt(
-      Boolean(cfg.allowBroaderContext),
-      chunks.map((c) => ({
-        heading: c.heading,
-        documentTitle: c.documentTitle,
-        body: c.body,
-        articleId: c.articleId,
-        articleNumber: c.articleNumber
-      })),
-      extra
-    )
-    const messages: AiMessage[] = [
-      { role: 'system', content: sys },
-      {
-        role: 'user',
-        content: `Вопрос:\n${userQuestion}\n\nСледуй системному сообщению. Где опираешься на фрагмент из контекста — укажи id=<uuid> из заголовка этого фрагмента.`
+    const result = await runAiPipeline({
+      db,
+      cfg,
+      agentExtra: extra,
+      question: userQuestion
+    })
+    return {
+      text: result.text,
+      citations: result.citations,
+      notice: result.notice,
+      retrieved: result.retrieved,
+      pipeline: result.pipeline
+    }
+  })
+
+  ipcMain.handle('ai:chatTurn', async (_e, payload: AiChatTurnPayload) => {
+    const db = getDb()
+    const { cfg: baseCfg, history: rawHistory, message: userMessage, agentId } = payload
+    const trimmed = userMessage.trim()
+    if (!trimmed) throw new Error('Пустое сообщение')
+
+    const history = rawHistory.slice(-AI_CHAT_MAX_HISTORY_MESSAGES)
+    const { cfg, extra } = mergeAgentConfig(db, baseCfg, agentId)
+
+    const explicitPinned = Array.isArray(payload.pinnedArticleIds)
+      ? payload.pinnedArticleIds.filter((s) => typeof s === 'string' && s.length > 0)
+      : []
+    const excludePinned = Array.isArray(payload.excludePinnedIds)
+      ? payload.excludePinnedIds.filter((s) => typeof s === 'string' && s.length > 0)
+      : []
+    const pinnedSet = new Set(explicitPinned)
+    for (const id of excludePinned) pinnedSet.delete(id)
+
+    const result = await runAiPipeline({
+      db,
+      cfg,
+      agentExtra: extra,
+      question: trimmed,
+      history,
+      pinnedArticleIds: [...pinnedSet],
+      excludePinnedIds: excludePinned
+    })
+    return {
+      text: result.text,
+      citations: result.citations,
+      notice: result.notice,
+      retrieved: result.retrieved,
+      pipeline: result.pipeline
+    }
+  })
+
+  /* --------------------- ai:embeddings:* --------------------- */
+  let embeddingsRebuildAbort = false
+
+  ipcMain.handle('ai:embeddings:status', (_e, cfg: AiProviderConfig) => {
+    return getEmbeddingsStatus(getDb(), cfg)
+  })
+
+  ipcMain.handle('ai:embeddings:cancel', () => {
+    embeddingsRebuildAbort = true
+    return true
+  })
+
+  ipcMain.handle('ai:embeddings:clear', () => {
+    clearEmbeddingsIndex(getDb())
+    return true
+  })
+
+  ipcMain.handle('ai:embeddings:rebuild', async (_e, cfg: AiProviderConfig) => {
+    const db = getDb()
+    embeddingsRebuildAbort = false
+    const sendProgress = (p: AiEmbeddingsProgress): void => {
+      try {
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed()) w.webContents.send('ai:embeddings:progress', p)
+        }
+      } catch {
+        /* окно может быть уничтожено — не критично */
       }
-    ]
-    const result = await completeChat(cfg, messages)
-    const citations = parseCitationsFromAnswer(
-      result.text,
-      chunks.map((c) => ({
-        articleId: c.articleId,
-        documentId: c.documentId,
-        documentTitle: c.documentTitle,
-        heading: c.heading,
-        articleNumber: c.articleNumber
-      }))
-    )
-    return { ...result, citations }
+    }
+    try {
+      const final = await rebuildArticleEmbeddings(db, cfg, {
+        isCancelled: () => embeddingsRebuildAbort,
+        onProgress: sendProgress
+      })
+      return final
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      const r: AiEmbeddingsProgress = { phase: 'error', processed: 0, total: 0, message }
+      sendProgress(r)
+      return r
+    }
+  })
+
+  ipcMain.handle('aiChat:list', () => {
+    const db = getDb()
+    const rows = db
+      .prepare(
+        `SELECT id, title, created_at, updated_at, provider, model, agent_id
+         FROM ai_conversations ORDER BY updated_at DESC LIMIT 200`
+      )
+      .all() as AiConversationSummary[]
+    return rows
+  })
+
+  ipcMain.handle('aiChat:create', (_e, payload: AiChatCreatePayload) => {
+    const db = getDb()
+    const id = uuid()
+    const t = nowIso()
+    const { cfg, agentId } = payload
+    const title = payload.title?.trim() || DEFAULT_AI_CHAT_TITLE
+    db.prepare(
+      `INSERT INTO ai_conversations (id, title, created_at, updated_at, provider, model, agent_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, title, t, t, cfg.provider, cfg.model, agentId ?? null)
+    return { id }
+  })
+
+  ipcMain.handle('aiChat:get', (_e, conversationId: string) => {
+    const db = getDb()
+    const conv = db
+      .prepare(
+        `SELECT id, title, created_at, updated_at, provider, model, agent_id FROM ai_conversations WHERE id = ?`
+      )
+      .get(conversationId) as AiConversationSummary | undefined
+    if (!conv) return null
+    const rows = db
+      .prepare(
+        `SELECT id, conversation_id, role, content, citations_json, created_at FROM ai_messages WHERE conversation_id = ? ORDER BY created_at ASC`
+      )
+      .all(conversationId) as {
+      id: string
+      conversation_id: string
+      role: string
+      content: string
+      citations_json: string | null
+      created_at: string
+    }[]
+    const messages = rows.map((m) => {
+      let citations: AiCitation[] | null = null
+      if (m.citations_json) {
+        try {
+          citations = JSON.parse(m.citations_json) as AiCitation[]
+        } catch {
+          citations = null
+        }
+      }
+      return {
+        id: m.id,
+        conversation_id: m.conversation_id,
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        citations,
+        created_at: m.created_at
+      }
+    })
+    return { conversation: conv, messages }
+  })
+
+  ipcMain.handle('aiChat:delete', (_e, id: string) => {
+    getDb().prepare('DELETE FROM ai_conversations WHERE id = ?').run(id)
+    return true
+  })
+
+  ipcMain.handle('aiChat:rename', (_e, payload: { id: string; title: string }) => {
+    const title = payload.title.trim()
+    if (!title) return false
+    const t = nowIso()
+    getDb()
+      .prepare('UPDATE ai_conversations SET title = ?, updated_at = ? WHERE id = ?')
+      .run(title, t, payload.id)
+    return true
+  })
+
+  ipcMain.handle('aiChat:appendTurn', (_e, payload: AiChatAppendTurnPayload) => {
+    const db = getDb()
+    const { conversationId, userContent, assistantContent, citations, agentId } = payload
+    const conv = db
+      .prepare('SELECT id, title FROM ai_conversations WHERE id = ?')
+      .get(conversationId) as { id: string; title: string } | undefined
+    if (!conv) throw new Error('Диалог не найден')
+
+    const uid = uuid()
+    const aid = uuid()
+    const base = Date.now()
+    const tUser = new Date(base).toISOString()
+    const tAsst = new Date(base + 1).toISOString()
+    const tUp = nowIso()
+    const citesJson = JSON.stringify(citations ?? [])
+    const nextTitle =
+      conv.title.trim() === DEFAULT_AI_CHAT_TITLE ? deriveConversationTitleFromFirstMessage(userContent) : conv.title
+
+    const run = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO ai_messages (id, conversation_id, role, content, citations_json, created_at) VALUES (?, ?, 'user', ?, NULL, ?)`
+      ).run(uid, conversationId, userContent, tUser)
+      db.prepare(
+        `INSERT INTO ai_messages (id, conversation_id, role, content, citations_json, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)`
+      ).run(aid, conversationId, assistantContent, citesJson, tAsst)
+      db.prepare(`UPDATE ai_conversations SET updated_at = ?, title = ?, agent_id = ? WHERE id = ?`).run(
+        tUp,
+        nextTitle,
+        agentId ?? null,
+        conversationId
+      )
+    })
+    run()
   })
 
   ipcMain.handle('aiAgents:list', () => {
@@ -718,7 +1027,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     overlay.hide()
   })
 
-  ipcMain.handle('overlay:dock', (_e, where: 'left' | 'right' | 'top-right' | 'center') => {
+  ipcMain.handle('overlay:dock', (_e, where: OverlayDockPosition) => {
     overlay.dock(where)
   })
 
@@ -935,7 +1244,8 @@ export function registerIpcHandlers(ctx: IpcContext): void {
         clickThrough: humanizeAccelerator(d.clickThrough),
         cheatsOverlay: humanizeAccelerator(d.cheatsOverlay),
         collectionsOverlay: humanizeAccelerator(d.collectionsOverlay)
-      }
+      },
+      registration: getHotkeyRegistrationStatus()
     }
   })
 
@@ -1035,17 +1345,19 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   ipcMain.handle(
     'collections:save',
-    (_e, row: { id?: string; name: string; description?: string | null; sort_order?: number }) => {
+    (_e, row: ArticleCollectionSavePayload) => {
       const db = getDb()
       const name = row.name?.trim()
       if (!name) return { ok: false as const, error: 'name' as const }
       const t = nowIso()
       const id = row.id?.trim() || uuid()
-      const existing = db.prepare('SELECT id FROM article_collections WHERE id = ?').get(id) as { id: string } | undefined
+      const existing = db.prepare('SELECT id, sort_order FROM article_collections WHERE id = ?').get(id) as
+        | { id: string; sort_order: number }
+        | undefined
       const sort =
         row.sort_order ??
-        ((db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM article_collections').get() as { m: number }).m +
-          1)
+        existing?.sort_order ??
+        ((db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM article_collections').get() as { m: number }).m + 1)
       if (existing) {
         db.prepare(
           `UPDATE article_collections SET name = ?, description = ?, sort_order = ? WHERE id = ?`
@@ -1251,16 +1563,19 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   ipcMain.handle(
     'cheatSheets:save',
-    (_e, row: { id?: string; title: string; body: string; sort_order?: number }) => {
+    (_e, row: CheatSheetSavePayload) => {
       const db = getDb()
       const title = row.title?.trim()
       const body = typeof row.body === 'string' ? row.body : ''
       if (!title) return { ok: false as const, error: 'title' as const }
       const t = nowIso()
       const id = row.id?.trim() || uuid()
-      const existing = db.prepare('SELECT id FROM cheat_sheets WHERE id = ?').get(id) as { id: string } | undefined
+      const existing = db.prepare('SELECT id, sort_order FROM cheat_sheets WHERE id = ?').get(id) as
+        | { id: string; sort_order: number }
+        | undefined
       const sort =
         row.sort_order ??
+        existing?.sort_order ??
         ((db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM cheat_sheets').get() as { m: number }).m + 1)
       if (existing) {
         db.prepare(`UPDATE cheat_sheets SET title = ?, body = ?, sort_order = ?, updated_at = ? WHERE id = ?`).run(
@@ -1275,6 +1590,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
           `INSERT INTO cheat_sheets (id, title, body, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
         ).run(id, title, body, sort, t, t)
       }
+      broadcastCheatSheetsChanged()
       return { ok: true as const, id }
     }
   )
@@ -1282,6 +1598,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('cheatSheets:delete', (_e, id: string) => {
     if (!id?.trim()) return false
     const r = getDb().prepare('DELETE FROM cheat_sheets WHERE id = ?').run(id.trim())
+    if (r.changes > 0) broadcastCheatSheetsChanged()
     return r.changes > 0
   })
 
@@ -1316,7 +1633,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     'notes:save',
     (
       _e,
-      payload: { id?: string; article_id?: string | null; scenario_key?: string | null; title?: string | null; body: string }
+      payload: UserNoteSavePayload
     ) => {
       const body = typeof payload.body === 'string' ? payload.body.trim() : ''
       if (!body) return { ok: false as const, error: 'empty_body' as const }
@@ -1345,6 +1662,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
           t
         )
       }
+      broadcastNotesChanged()
       return { ok: true as const, id }
     }
   )
@@ -1352,6 +1670,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('notes:delete', (_e, id: string) => {
     if (typeof id !== 'string' || !id.trim()) return { ok: false as const }
     const r = getDb().prepare('DELETE FROM notes WHERE id = ?').run(id.trim())
+    if (r.changes > 0) broadcastNotesChanged()
     return { ok: r.changes > 0 }
   })
 }

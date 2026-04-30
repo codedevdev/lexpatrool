@@ -1,37 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { articleDisplayTitle } from '@shared/article-display'
-
-interface NoteRow {
-  id: string
-  article_id: string | null
-  scenario_key: string | null
-  title: string | null
-  body: string
-  updated_at: string
-  article_heading: string | null
-  article_number: string | null
-  document_id: string | null
-  document_title: string | null
-}
-
-interface BookmarkRow {
-  id: string
-  article_id: string
-  created_at: string
-  heading: string
-  article_number: string | null
-  document_id: string
-  document_title: string
-}
-
-interface SearchHitLite {
-  article_id: string
-  document_id: string
-  document_title: string
-  heading: string
-  article_number: string | null
-}
+import type { BookmarkArticleRecord, SearchHit, UserNoteRecord } from '@shared/types'
 
 function fmtDate(iso: string): string {
   try {
@@ -43,8 +13,8 @@ function fmtDate(iso: string): string {
 }
 
 export function NotesPage(): JSX.Element {
-  const [notes, setNotes] = useState<NoteRow[]>([])
-  const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([])
+  const [notes, setNotes] = useState<UserNoteRecord[]>([])
+  const [bookmarks, setBookmarks] = useState<BookmarkArticleRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [title, setTitle] = useState('')
@@ -53,16 +23,20 @@ export function NotesPage(): JSX.Element {
   const [articleId, setArticleId] = useState<string | null>(null)
   const [articleLabel, setArticleLabel] = useState<string | null>(null)
   const [articleQuery, setArticleQuery] = useState('')
-  const [articleHits, setArticleHits] = useState<SearchHitLite[]>([])
+  const [articleHits, setArticleHits] = useState<SearchHit[]>([])
   const [articleOpen, setArticleOpen] = useState(false)
   const [saveHint, setSaveHint] = useState<string | null>(null)
+  const [noteQuery, setNoteQuery] = useState('')
+  const [scenarioFilter, setScenarioFilter] = useState('')
+  const [linkFilter, setLinkFilter] = useState<'all' | 'linked' | 'unlinked'>('all')
+  const lastSavedRef = useRef<{ title: string; scenarioKey: string; body: string; articleId: string | null } | null>(null)
 
   const loadAll = useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
       const [n, b] = await Promise.all([
-        window.lawHelper.notes.list() as Promise<NoteRow[]>,
-        window.lawHelper.bookmarks.list() as Promise<BookmarkRow[]>
+        window.lawHelper.notes.list(),
+        window.lawHelper.bookmarks.list()
       ])
       setNotes(Array.isArray(n) ? n : [])
       setBookmarks(Array.isArray(b) ? b : [])
@@ -76,6 +50,11 @@ export function NotesPage(): JSX.Element {
   }, [loadAll])
 
   useEffect(() => {
+    const off = window.lawHelper.notes.onChanged(() => void loadAll())
+    return () => off()
+  }, [loadAll])
+
+  useEffect(() => {
     const q = articleQuery.trim()
     if (q.length < 2) {
       setArticleHits([])
@@ -83,14 +62,46 @@ export function NotesPage(): JSX.Element {
     }
     const t = setTimeout(() => {
       void window.lawHelper.search.query(q).then((raw) => {
-        const hits = raw as SearchHitLite[]
-        setArticleHits(Array.isArray(hits) ? hits.slice(0, 12) : [])
+        setArticleHits(Array.isArray(raw) ? raw.slice(0, 12) : [])
       })
     }, 220)
     return () => clearTimeout(t)
   }, [articleQuery])
 
   const selectedNote = useMemo(() => notes.find((x) => x.id === selectedId) ?? null, [notes, selectedId])
+
+  const scenarios = useMemo(() => {
+    const values = new Set<string>()
+    for (const n of notes) {
+      const s = n.scenario_key?.trim()
+      if (s) values.add(s)
+    }
+    return [...values].sort((a, b) => a.localeCompare(b, 'ru'))
+  }, [notes])
+
+  const filteredNotes = useMemo(() => {
+    const q = noteQuery.trim().toLowerCase()
+    return notes.filter((n) => {
+      if (scenarioFilter && n.scenario_key !== scenarioFilter) return false
+      if (linkFilter === 'linked' && !n.article_id) return false
+      if (linkFilter === 'unlinked' && n.article_id) return false
+      if (!q) return true
+      return `${n.title ?? ''}\n${n.body}\n${n.scenario_key ?? ''}\n${n.article_heading ?? ''}\n${n.document_title ?? ''}`
+        .toLowerCase()
+        .includes(q)
+    })
+  }, [notes, noteQuery, scenarioFilter, linkFilter])
+
+  const dirty = useMemo(() => {
+    const saved = lastSavedRef.current
+    if (!saved) return Boolean(title.trim() || scenarioKey.trim() || body.trim() || articleId)
+    return (
+      title !== saved.title ||
+      scenarioKey !== saved.scenarioKey ||
+      body !== saved.body ||
+      articleId !== saved.articleId
+    )
+  }, [title, scenarioKey, body, articleId])
 
   function resetEditor(): void {
     setSelectedId(null)
@@ -103,9 +114,10 @@ export function NotesPage(): JSX.Element {
     setArticleHits([])
     setArticleOpen(false)
     setSaveHint(null)
+    lastSavedRef.current = null
   }
 
-  function openNote(row: NoteRow): void {
+  function openNote(row: UserNoteRecord): void {
     setSelectedId(row.id)
     setTitle(row.title ?? '')
     setScenarioKey(row.scenario_key ?? '')
@@ -120,6 +132,21 @@ export function NotesPage(): JSX.Element {
     setArticleHits([])
     setArticleOpen(false)
     setSaveHint(null)
+    lastSavedRef.current = {
+      title: row.title ?? '',
+      scenarioKey: row.scenario_key ?? '',
+      body: row.body,
+      articleId: row.article_id
+    }
+  }
+
+  function bindArticle(row: BookmarkArticleRecord): void {
+    setArticleId(row.article_id)
+    setArticleLabel(articleDisplayTitle(row.article_number, row.heading))
+    setArticleQuery('')
+    setArticleHits([])
+    setArticleOpen(false)
+    setSaveHint('Статья привязана из закладок. Не забудьте сохранить заметку.')
   }
 
   async function saveNote(): Promise<void> {
@@ -142,7 +169,31 @@ export function NotesPage(): JSX.Element {
     }
     await loadAll()
     setSelectedId(r.id)
+    lastSavedRef.current = {
+      title: title.trim(),
+      scenarioKey: scenarioKey.trim(),
+      body: trimmed,
+      articleId
+    }
     setSaveHint('Сохранено.')
+  }
+
+  async function duplicateNote(): Promise<void> {
+    if (!selectedNote) return
+    const r = await window.lawHelper.notes.save({
+      title: `${selectedNote.title?.trim() || 'Заметка'} (копия)`,
+      scenario_key: selectedNote.scenario_key,
+      article_id: selectedNote.article_id,
+      body: selectedNote.body
+    })
+    if (r.ok) {
+      await loadAll()
+      const copy = await window.lawHelper.notes.get(r.id)
+      if (copy) openNote(copy)
+      setSaveHint('Копия создана.')
+    } else {
+      setSaveHint('Не удалось создать копию.')
+    }
   }
 
   async function deleteNote(): Promise<void> {
@@ -152,6 +203,20 @@ export function NotesPage(): JSX.Element {
     resetEditor()
     await loadAll()
   }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        const tag = (e.target as HTMLElement | null)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+          e.preventDefault()
+          void saveNote()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 pb-4 md:space-y-5">
@@ -186,12 +251,21 @@ export function NotesPage(): JSX.Element {
                     <div className="truncate text-white/90">{articleDisplayTitle(b.article_number, b.heading)}</div>
                     <div className="text-[11px] text-app-muted">{fmtDate(b.created_at)}</div>
                   </div>
-                  <Link
-                    to={`/reader/${b.document_id}/${b.article_id}`}
-                    className="shrink-0 rounded-md border border-accent/35 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent hover:bg-accent/20"
-                  >
-                    Открыть
-                  </Link>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => bindArticle(b)}
+                      className="rounded-md border border-white/10 px-2.5 py-1 text-[11px] text-app-muted hover:bg-white/5"
+                    >
+                      Привязать
+                    </button>
+                    <Link
+                      to={`/reader/${b.document_id}/${b.article_id}`}
+                      className="rounded-md border border-accent/35 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent hover:bg-accent/20"
+                    >
+                      Открыть
+                    </Link>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -211,15 +285,48 @@ export function NotesPage(): JSX.Element {
               Новая
             </button>
           </div>
+          <div className="mt-3 space-y-2">
+            <input
+              className="w-full rounded-lg border border-white/10 bg-black/25 px-2.5 py-1.5 text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/40"
+              placeholder="Поиск по заметкам, статьям и сценариям…"
+              value={noteQuery}
+              onChange={(e) => setNoteQuery(e.target.value)}
+            />
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              <select
+                className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white outline-none"
+                value={scenarioFilter}
+                onChange={(e) => setScenarioFilter(e.target.value)}
+              >
+                <option value="">Все сценарии</option>
+                {scenarios.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white outline-none"
+                value={linkFilter}
+                onChange={(e) => setLinkFilter(e.target.value as 'all' | 'linked' | 'unlinked')}
+              >
+                <option value="all">Все привязки</option>
+                <option value="linked">Со статьёй</option>
+                <option value="unlinked">Без статьи</option>
+              </select>
+            </div>
+          </div>
           {loading ? (
             <p className="mt-3 text-sm text-app-muted">Загрузка…</p>
           ) : notes.length === 0 ? (
             <p className="mt-3 text-xs leading-snug text-app-muted">
               Пока нет — нажмите «Новая» и заполните форму ниже.
             </p>
+          ) : filteredNotes.length === 0 ? (
+            <p className="mt-3 text-xs leading-snug text-app-muted">Нет заметок по выбранным фильтрам.</p>
           ) : (
             <ul className="mt-3 max-h-[min(280px,38vh)] space-y-1 overflow-y-auto overflow-x-hidden pr-0.5 sm:max-h-[min(320px,42vh)]">
-              {notes.map((n) => (
+              {filteredNotes.map((n) => (
                 <li key={n.id}>
                   <button
                     type="button"
@@ -234,6 +341,7 @@ export function NotesPage(): JSX.Element {
                       {n.title?.trim() || n.body.trim().split('\n')[0]?.slice(0, 72) || 'Без названия'}
                     </div>
                     <div className="mt-0.5 line-clamp-1 text-[11px] text-app-muted">
+                      {n.scenario_key ? `${n.scenario_key} · ` : ''}
                       {n.article_heading ? `↳ ${n.article_heading}` : 'Без статьи'} · {fmtDate(n.updated_at)}
                     </div>
                   </button>
@@ -267,6 +375,20 @@ export function NotesPage(): JSX.Element {
                 className="w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-sm text-white outline-none focus:border-accent/50"
                 placeholder="patrol / court …"
               />
+              {scenarios.length > 0 ? (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {scenarios.slice(0, 6).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setScenarioKey(s)}
+                      className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-white/45 hover:text-white"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </label>
           </div>
 
@@ -346,6 +468,8 @@ export function NotesPage(): JSX.Element {
             >
               Сохранить
             </button>
+            <span className="text-[11px] text-white/35">Ctrl+S</span>
+            {dirty ? <span className="text-[11px] text-amber-200/90">Есть несохранённые изменения</span> : null}
             {selectedId ? (
               <button
                 type="button"
@@ -353,6 +477,15 @@ export function NotesPage(): JSX.Element {
                 className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-1.5 text-xs text-red-200 hover:bg-red-500/20 sm:text-sm sm:px-4 sm:py-2"
               >
                 Удалить
+              </button>
+            ) : null}
+            {selectedId ? (
+              <button
+                type="button"
+                onClick={() => void duplicateNote()}
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-app-muted hover:border-white/20 hover:text-white sm:text-sm sm:px-4 sm:py-2"
+              >
+                Дублировать
               </button>
             ) : null}
             {selectedNote?.document_id && selectedNote.article_id ? (

@@ -9,6 +9,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 type GetDb = () => Database
 
 const OVERLAY_AOT_KEY = 'overlay_always_on_top_level'
+const OVERLAY_INTERACTION_MODE_KEY = 'overlay_interaction_mode'
 
 export type ToolOverlayKind = 'cheats' | 'collections'
 
@@ -45,6 +46,8 @@ const CONFIG: Record<
 }
 
 type OverlayAotLevel = 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
+type OverlayInteractionMode = 'game' | 'interactive'
+type RevealOptions = { forceFocus?: boolean }
 
 function readOverlayAotLevel(db: Database): OverlayAotLevel {
   const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_AOT_KEY) as
@@ -53,6 +56,15 @@ function readOverlayAotLevel(db: Database): OverlayAotLevel {
   const v = row?.value?.trim()
   if (v === 'off' || v === 'floating' || v === 'screen-saver' || v === 'pop-up-menu') return v
   return 'pop-up-menu'
+}
+
+function readOverlayInteractionMode(db: Database): OverlayInteractionMode {
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_INTERACTION_MODE_KEY) as
+    | { value: string }
+    | undefined
+  const v = row?.value?.trim()
+  if (v === 'interactive' || v === 'game') return v
+  return 'game'
 }
 
 type Bounds = { x: number; y: number; width: number; height: number }
@@ -151,11 +163,11 @@ export class ToolOverlayController {
   ensure(): BrowserWindow {
     if (this.win && !this.win.isDestroyed()) return this.win
 
-    const { width: sw, height: sh, x: sx, y: sy } = screen.getPrimaryDisplay().workArea
     const db = this.getDb()
     const c = this.cfg()
     this.alwaysOnTopLevel = readOverlayAotLevel(db)
     const saved = readBounds(db, c.boundsKey)
+    const { width: sw, height: sh, x: sx, y: sy } = workAreaForInitialBounds(saved)
 
     const defaultW = Math.min(480, Math.floor(sw * c.defaultWidthRatio))
     const defaultH = Math.min(720, Math.floor(sh * c.defaultHeightRatio))
@@ -194,6 +206,12 @@ export class ToolOverlayController {
       }
     })
 
+    try {
+      this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    } catch {
+      /* best-effort: Windows may ignore this, but macOS/Linux benefit from it */
+    }
+
     this.applyAlwaysOnTopToWindow(this.win)
     this.win.on('move', () => this.schedulePersistBounds())
     this.win.on('resize', () => this.schedulePersistBounds())
@@ -225,7 +243,7 @@ export class ToolOverlayController {
   }
 
   /** Как основной оверлей: дождаться готовности, иначе frameless/прозрачное окно часто не появляется. */
-  private reveal(w: BrowserWindow): void {
+  private reveal(w: BrowserWindow, options?: RevealOptions): void {
     if (w.isDestroyed()) return
     const wc = w.webContents
     const loading = wc.isLoading()
@@ -241,7 +259,7 @@ export class ToolOverlayController {
         revealTimer = null
       }
       toolLog(this.kind, 'reveal show', reason)
-      if (toolOverlayRevealNoFocus()) {
+      if (this.shouldRevealWithoutFocus(options)) {
         w.showInactive()
       } else {
         w.show()
@@ -272,21 +290,21 @@ export class ToolOverlayController {
     }, 0)
   }
 
-  show(): void {
+  show(options?: RevealOptions): void {
     const w = this.ensure()
     if (w.isDestroyed()) return
     if (w.isVisible()) {
       this.applyTopZOrder(w)
       return
     }
-    this.reveal(w)
+    this.reveal(w, options)
   }
 
-  toggle(): void {
+  toggle(options?: RevealOptions): void {
     const w = this.ensure()
     if (w.isDestroyed()) return
     if (w.isVisible()) w.hide()
-    else this.reveal(w)
+    else this.reveal(w, options)
   }
 
   bringToFront(): void {
@@ -298,7 +316,7 @@ export class ToolOverlayController {
 
   dock(where: 'left' | 'right' | 'top-right' | 'center'): void {
     const w = this.ensure()
-    const { width: sw, height: sh, x: sx, y: sy } = screen.getPrimaryDisplay().workArea
+    const { width: sw, height: sh, x: sx, y: sy } = screen.getDisplayMatching(w.getBounds()).workArea
     const cur = w.getBounds()
     const margin = 10
     const c = this.cfg()
@@ -347,6 +365,18 @@ export class ToolOverlayController {
     this.alwaysOnTopLevel = readOverlayAotLevel(this.getDb())
     this.applyAlwaysOnTopToWindow(w)
     w.moveTop()
+    this.reinforceTopZOrder(w)
+  }
+
+  private reinforceTopZOrder(w: BrowserWindow): void {
+    if (this.alwaysOnTopLevel === 'off') return
+    const reapply = (): void => {
+      if (w.isDestroyed() || !w.isVisible()) return
+      this.applyAlwaysOnTopToWindow(w)
+      w.moveTop()
+    }
+    setTimeout(reapply, 80)
+    setTimeout(reapply, 320)
   }
 
   private applyAlwaysOnTopToWindow(w: BrowserWindow): void {
@@ -361,4 +391,18 @@ export class ToolOverlayController {
     }
     w.setAlwaysOnTop(true, levelMap[this.alwaysOnTopLevel])
   }
+
+  private shouldRevealWithoutFocus(options?: RevealOptions): boolean {
+    if (toolOverlayRevealNoFocus()) return true
+    if (options?.forceFocus === true) return false
+    return readOverlayInteractionMode(this.getDb()) === 'game'
+  }
+}
+
+function workAreaForInitialBounds(saved: Bounds | null): Bounds {
+  if (saved) {
+    return screen.getDisplayMatching(saved).workArea
+  }
+  const cursor = screen.getCursorScreenPoint()
+  return screen.getDisplayNearestPoint(cursor).workArea
 }
