@@ -1,16 +1,18 @@
 import { writeFileSync } from 'fs'
-import { join, dirname } from 'path'
+import { join } from 'path'
+import { win32 as winPath } from 'path'
 import { spawn } from 'child_process'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { appendUpdaterLog, ensureUpdaterLogPath } from './logger'
 
+/** Каталог установки по пути exe: всегда win32-семантика (CI на Linux, релиз на Windows). */
 export function installDirFromExe(exePath: string): string {
-  return dirname(exePath)
+  return winPath.dirname(exePath)
 }
 
 export function launchExePathForInstallDir(installDir: string): string {
-  return join(installDir, 'LexPatrol.exe')
+  return winPath.join(installDir, 'LexPatrol.exe')
 }
 
 /** Требуется ли elevation для записи в каталог установки. */
