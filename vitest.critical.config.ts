@@ -5,21 +5,6 @@ import { defineConfig } from 'vitest/config'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 
-const coverageInclude = [
-  'src/shared/**/*.ts',
-  'src/main/updater/**/*.ts',
-  'src/main/overlay-layout-constants.ts',
-  'src/main/backup-restore.ts',
-  'src/main/global-shortcuts.ts',
-  'src/main/seed.ts',
-  'src/main/ipc/merge-agent-config.ts',
-  'src/services/retrieval.ts',
-  'src/parsers/article-import-filter.ts',
-  'src/parsers/html-element-plain-text.ts',
-  'src/renderer/src/lib/hotkey-format.ts',
-  'src/renderer/src/components/**/*.{ts,tsx}'
-]
-
 const plugins = [react()]
 const resolve = {
   alias: {
@@ -31,6 +16,7 @@ const resolve = {
 }
 const setupFiles = ['src/test-utils/vitest-setup.ts'] as const
 
+/** Строгий профиль только для Tier 1 (без merge с базовым coverage.include). */
 export default defineConfig({
   plugins,
   resolve,
@@ -61,25 +47,32 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      reportsDirectory: './coverage',
+      reportsDirectory: './coverage/critical',
       reporter: ['text', 'lcov', 'html', 'json-summary', 'json'],
       reportOnFailure: true,
       all: false,
-      include: coverageInclude,
+      include: [
+        'src/main/updater/**/*.ts',
+        'src/shared/**/*.ts',
+        'src/services/retrieval.ts',
+        'src/parsers/html-element-plain-text.ts',
+        'src/parsers/article-import-filter.ts',
+        'src/main/seed.ts',
+        'src/main/global-shortcuts.ts',
+        'src/main/ipc/merge-agent-config.ts'
+      ],
       exclude: [
         '**/*.test.ts',
         '**/*.test.tsx',
         '**/node_modules/**',
         '**/__fixtures__/**',
-        'src/test-utils/**',
-        'out/**',
-        'LexPatrool-bin/**'
+        'src/test-utils/**'
       ],
       thresholds: {
-        lines: 40,
-        branches: 32,
-        functions: 38,
-        statements: 40
+        lines: 75,
+        branches: 66,
+        functions: 72,
+        statements: 75
       }
     }
   }

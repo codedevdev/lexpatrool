@@ -10,6 +10,7 @@ import { applyOverlayGlobalShortcuts } from './global-shortcuts'
 import { destroyTray, isAppQuitting, setupSystemTray } from './system-tray'
 import { scheduleStartupUpdateCheck } from './update-check'
 import { isSafeExternalHttpUrl } from './safe-external-url'
+import { parseUpdatedFromArgv, readUpdateSessionState, clearUpdateSessionState } from './updater/state'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
@@ -269,6 +270,32 @@ if (!app.requestSingleInstanceLock()) {
     applyOverlayGlobalShortcuts(overlay, cheatToolOverlay, collectionToolOverlay, getDb())
 
     scheduleStartupUpdateCheck(() => mainWindow)
+
+    const stale = readUpdateSessionState()
+    if (stale && stale.targetVersion === app.getVersion() && !parseUpdatedFromArgv()) {
+      clearUpdateSessionState()
+    }
+
+    if (mainWindow) {
+      const sendAfterUpdate = (): void => {
+        const oldV = parseUpdatedFromArgv()
+        if (!oldV || !mainWindow || mainWindow.isDestroyed()) return
+        const st = readUpdateSessionState()
+        try {
+          mainWindow.webContents.send('app:after-update', {
+            oldVersion: oldV,
+            newVersion: app.getVersion(),
+            releaseUrl: st?.releaseUrl ?? '',
+            route: st?.route,
+            reader: st?.reader
+          })
+        } catch {
+          /* ignore */
+        }
+        clearUpdateSessionState()
+      }
+      mainWindow.webContents.once('did-finish-load', sendAfterUpdate)
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow()

@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master, develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild native modules for Node (Vitest)
+        run: npm rebuild better-sqlite3
+
+      - name: Unit tests (critical coverage thresholds)
+        run: npm run test:ci:critical
+
+      - name: Unit tests (full coverage thresholds)
+        run: npm run test:ci
+
+      - name: Vitest coverage report (PR comment)
+        if: github.event_name == 'pull_request' && always()
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          json-summary-path: coverage/coverage-summary.json
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          path: |
+            coverage/lcov.info
+            coverage/index.html
+            coverage/coverage-summary.json
+            coverage/coverage-final.json
+            coverage/critical/lcov.info
+            coverage/critical/index.html
+            coverage/critical/coverage-summary.json
+            coverage/critical/coverage-final.json
+          if-no-files-found: ignore
+
+      - name: Coverage summary (job log)
+        if: success()
+        run: |
+          echo '### Coverage' >> "$GITHUB_STEP_SUMMARY"
+          echo 'HTML: artifact `coverage-*/coverage/index.html` (download from Actions).' >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: [lint, test]
+    if: |
+      github.event_name == 'push' && (
+        startsWith(github.ref, 'refs/tags/v') ||
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/master' ||
+        github.ref == 'refs/heads/develop'
+      )
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installers
+        run: npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Generate SHA256 sidecars for installers
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path 'LexPatrool-bin' -Filter '*.exe' -File | ForEach-Object {
+            $h = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()
+            $sidecar = $_.FullName + '.sha256'
+            Set-Content -LiteralPath $sidecar -Value $h -NoNewline -Encoding ascii
+            Write-Host "Wrote $sidecar"
+          }
+
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-${{ github.run_id }}
+          path: |
+            LexPatrool-bin/LexPatrol Setup *.exe
+            LexPatrool-bin/LexPatrol Setup *.exe.sha256
+            LexPatrool-bin/LexPatrol *.exe
+            LexPatrool-bin/LexPatrol *.exe.sha256
+          if-no-files-found: error
+
+  release:
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build-${{ github.run_id }}
+          path: LexPatrool-bin
+
+      - name: Compose release description (tag message + GitHub changelog)
+        id: release_body
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          CUSTOM=$(git for-each-ref --format='%(contents)' "refs/tags/${TAG}" 2>/dev/null || true)
+          if [ -z "${CUSTOM//[$'\t\r\n ']}" ]; then
+            CUSTOM=$(git show -s --format=%B "${GITHUB_SHA}")
+          fi
+          GEN=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f "tag_name=${TAG}" \
+            --jq .body 2>/dev/null || echo "")
+          {
+            echo "body<<REL_BODY_EOF"
+            printf '%s\n' "${CUSTOM}"
+            if [ -n "${GEN}" ]; then
+              printf '\n---\n\n%s\n' "${GEN}"
+            fi
+            echo "REL_BODY_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload installers to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          body: ${{ steps.release_body.outputs.body }}
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: |
+            LexPatrool-bin/LexPatrol Setup *.exe
+            LexPatrool-bin/LexPatrol Setup *.exe.sha256
+            LexPatrool-bin/LexPatrol *.exe
+            LexPatrool-bin/LexPatrol *.exe.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -129,7 +129,8 @@ type OverlayUiPrefs = {
   opacity?: number
   focusMode?: boolean
   fontScale?: number
-  toolsExpanded?: boolean
+  /** Яркость содержимого оверлея, 0.75–1.25 */
+  overlayBrightness?: number
   cheatSheetMode?: boolean
   articleListMode?: OverlayArticleListMode
 }
@@ -147,94 +148,25 @@ function useDebounced<T>(value: T, ms: number): T {
   return v
 }
 
-function MouseModeRow({
-  clickThrough,
-  onOverlay,
-  onGame,
-  variant,
-  hotkeyMouse
-}: {
-  clickThrough: boolean
-  onOverlay: () => void
-  onGame: () => void
-  /** compact — только переключатель; full — подсказки под кнопками мыши */
-  variant: 'compact' | 'full'
-  /** Подпись для режима «мышь в игру» из настроек хоткеев */
-  hotkeyMouse: string
-}): JSX.Element {
-  const btnPad = variant === 'compact' ? 'px-2 py-1.5 text-[10px]' : 'px-2 py-2 text-[11px]'
-  const wrap = variant === 'compact' ? 'mt-1.5' : 'mt-2 space-y-1.5'
-  return (
-    <div className={wrap} style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-      <div className="flex rounded-lg border border-white/10 bg-black/35 p-0.5 shadow-inner">
-        <button
-          type="button"
-          title="Клики и колесо обрабатывает LexPatrol"
-          className={`flex-1 rounded-md font-semibold transition ${btnPad} ${
-            !clickThrough
-              ? 'bg-accent/30 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
-              : 'text-white/45 hover:bg-white/[0.06] hover:text-white/80'
-          }`}
-          onClick={onOverlay}
-        >
-          В оверлей
-        </button>
-        <button
-          type="button"
-          title={`Клики проходят в игру; вернуться: кнопка или ${hotkeyMouse}`}
-          className={`flex-1 rounded-md font-semibold transition ${btnPad} ${
-            clickThrough
-              ? 'bg-emerald-500/25 text-emerald-50 shadow-[0_0_0_1px_rgba(52,211,153,0.35)]'
-              : 'text-white/45 hover:bg-white/[0.06] hover:text-white/80'
-          }`}
-          onClick={onGame}
-        >
-          В игру
-        </button>
-      </div>
-      {variant === 'full' ? (
-        <p className="px-0.5 text-[9px] leading-snug text-app-muted">
-          {clickThrough ? (
-            <>
-              Сейчас мышь идёт <span className="text-emerald-200/90">в игру</span>. Чтобы снова нажимать кнопки оверлея —
-              выберите «В оверлей» или <span className="font-mono text-white/60">{hotkeyMouse}</span>.
-            </>
-          ) : (
-            <>
-              Сейчас вы работаете <span className="text-accent/90">с панелью</span>. Перед игрой включите «В игру», чтобы
-              не перекрывать клики.
-            </>
-          )}
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
 function OverlayInteractionModeRow({
   mode,
-  onChange,
-  variant
+  onChange
 }: {
   mode: OverlayInteractionMode
   onChange: (mode: OverlayInteractionMode) => void
-  variant: 'compact' | 'full'
 }): JSX.Element {
-  const btnPad = variant === 'compact' ? 'px-2 py-1 text-[9px]' : 'px-2 py-1.5 text-[10px]'
-  const showHint = variant === 'full'
+  const btnPad = 'px-2 py-1.5 text-[10px]'
   return (
-    <div
-      className={variant === 'compact' ? 'mt-1.5' : 'mt-2 space-y-1'}
-      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-    >
-      <div className="flex rounded-lg border border-white/10 bg-black/35 p-0.5 shadow-inner">
+    <div className="mt-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div className="text-[9px] font-medium uppercase tracking-wide text-[#6b6582]">Режим</div>
+      <div className="mt-1 flex rounded-lg border border-[#322c4d] bg-[#1d192a] p-0.5 shadow-inner">
         <button
           type="button"
           title="Показывать без захвата фокуса, чтобы игра продолжала получать ввод"
           className={`flex-1 rounded-md font-semibold transition ${btnPad} ${
             mode === 'game'
-              ? 'bg-emerald-500/25 text-emerald-50 shadow-[0_0_0_1px_rgba(52,211,153,0.35)]'
-              : 'text-white/45 hover:bg-white/[0.06] hover:text-white/80'
+              ? 'bg-[#3c2e7a] text-[#e6e3ee] shadow-[inset_0_0_0_1px_#5a4ab0]'
+              : 'text-[#8a8497] can-hover:hover:bg-[#2a2540] can-hover:hover:text-[#e6e3ee]'
           }`}
           onClick={() => onChange('game')}
         >
@@ -242,64 +174,17 @@ function OverlayInteractionModeRow({
         </button>
         <button
           type="button"
-          title="Оверлей будет вести себя как активное окно и сразу принимать клавиатуру"
+          title="Оверлей ведёт себя как активное окно и сразу принимает клавиатуру"
           className={`flex-1 rounded-md font-semibold transition ${btnPad} ${
             mode === 'interactive'
-              ? 'bg-accent/30 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
-              : 'text-white/45 hover:bg-white/[0.06] hover:text-white/80'
+              ? 'bg-[#3c2e7a] text-[#e6e3ee] shadow-[inset_0_0_0_1px_#5a4ab0]'
+              : 'text-[#8a8497] can-hover:hover:bg-[#2a2540] can-hover:hover:text-[#e6e3ee]'
           }`}
           onClick={() => onChange('interactive')}
         >
           Интерактивный
         </button>
       </div>
-      {showHint ? (
-        <p className="px-0.5 text-[9px] leading-snug text-app-muted">
-          {mode === 'game'
-            ? 'Показ без фокуса; поиск открывает ввод отдельно.'
-            : 'Оверлей получает фокус при показе.'}
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-function OverlayStatusStrip({
-  clickThrough,
-  mode,
-  hotkeyMouse,
-  hotkeyToggle,
-  compact
-}: {
-  clickThrough: boolean
-  mode: OverlayInteractionMode
-  hotkeyMouse: string
-  hotkeyToggle: string
-  compact: boolean
-}): JSX.Element {
-  return (
-    <div
-      className={`mt-1.5 flex flex-wrap items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/25 ${
-        compact ? 'px-2 py-1 text-[9px]' : 'px-2.5 py-1.5 text-[10px]'
-      } text-white/55`}
-      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-    >
-      <span
-        className={`rounded-full px-2 py-0.5 font-semibold ${
-          clickThrough ? 'bg-emerald-500/15 text-emerald-100' : 'bg-accent/15 text-accent'
-        }`}
-      >
-        Мышь: {clickThrough ? 'в игру' : 'в оверлей'}
-      </span>
-      <span className="rounded-full bg-white/[0.05] px-2 py-0.5">
-        Показ: {mode === 'game' ? 'без фокуса' : 'с фокусом'}
-      </span>
-      <span className="min-w-0 truncate">
-        Вернуть мышь: <span className="font-mono text-white/70">{hotkeyMouse}</span>
-      </span>
-      <span className="min-w-0 truncate">
-        Открыть/скрыть: <span className="font-mono text-white/70">{hotkeyToggle}</span>
-      </span>
     </div>
   )
 }
@@ -314,7 +199,9 @@ function ArticleRail({
   onSelect: (pin: Pinned, index: number) => void
 }): JSX.Element {
   return (
-    <aside className={`mr-1 flex w-10 shrink-0 flex-col gap-1 overflow-y-auto rounded-xl border border-white/[0.08] bg-black/30 p-1 sm:mr-1.5 sm:w-12 ${ovScroll}`}>
+    <aside
+      className={`mr-1 flex w-10 shrink-0 flex-col gap-1 overflow-y-auto rounded-xl border border-[#322c4d] bg-[#1d192a] p-1 sm:mr-1.5 sm:w-12 ${ovScroll}`}
+    >
       {pins.map((p, i) => {
         const active = p.id === activeId
         return (
@@ -325,8 +212,8 @@ function ArticleRail({
             onClick={() => onSelect(p, i)}
             className={`group flex h-9 w-full items-center justify-center rounded-lg border text-[9px] font-semibold transition ${
               active
-                ? 'border-accent/45 bg-accent/25 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.25)]'
-                : 'border-white/[0.07] bg-white/[0.04] text-white/50 hover:border-white/18 hover:bg-white/[0.08] hover:text-white'
+                ? 'border-[#5a4ab0] bg-[#3c2e7a] text-[#e6e3ee] shadow-[inset_0_0_0_1px_#5a4ab0]'
+                : 'border-[#2a2540] bg-[#15121e] text-[#8a8497] can-hover:hover:border-[#322c4d] can-hover:hover:bg-[#1d192a] can-hover:hover:text-[#e6e3ee]'
             }`}
           >
             <span className="max-w-[2.2rem] truncate font-mono">{p.article_number?.trim() || i + 1}</span>
@@ -348,7 +235,7 @@ function OverlayPositionControl(): JSX.Element {
   ]
   return (
     <div className="min-w-0">
-      <div className="text-[9px] font-medium uppercase tracking-wide text-white/45">Положение окна</div>
+      <div className="text-[9px] font-medium uppercase tracking-wide text-[#6b6582]">Положение</div>
       <div className="mt-1 grid grid-cols-3 gap-1">
         {items.map((it) => (
           <button
@@ -356,15 +243,12 @@ function OverlayPositionControl(): JSX.Element {
             type="button"
             title={it.title}
             onClick={() => void window.lawHelper.overlay.dock(it.id)}
-            className="min-w-0 rounded-lg border border-white/10 bg-black/35 px-1.5 py-1.5 text-[9px] font-semibold text-white/62 transition hover:border-accent/30 hover:bg-accent/10 hover:text-white sm:px-2 sm:text-[10px]"
+            className="min-w-0 rounded-lg border border-[#322c4d] bg-[#1d192a] px-1.5 py-1.5 text-[9px] font-semibold text-[#b8b3cc] transition can-hover:hover:border-[#5a4ab0] can-hover:hover:bg-[#3c2e7a]/40 can-hover:hover:text-[#e6e3ee] sm:px-2 sm:text-[10px]"
           >
             {it.label}
           </button>
         ))}
       </div>
-      <p className="mt-1 text-[9px] leading-snug text-white/42">
-        «Авто» — компактный угол; «Справа+» — длинный список.
-      </p>
     </div>
   )
 }
@@ -392,8 +276,8 @@ function DensePinnedList({
         return (
           <li
             key={p.id}
-            className={`overflow-hidden rounded-lg border bg-black/24 transition ${
-              active ? 'border-accent/40 bg-accent/[0.08]' : 'border-white/[0.08] hover:border-accent/25 hover:bg-white/[0.03]'
+            className={`overflow-hidden rounded-lg border bg-[#1d192a] transition ${
+              active ? 'border-[#5a4ab0] bg-[#3c2e7a]/25' : 'border-[#322c4d] can-hover:hover:border-[#5a4ab0]/50 can-hover:hover:bg-[#15121e]'
             }`}
           >
             <div className="flex min-w-0 items-center gap-2 px-2 py-1.5">
@@ -404,14 +288,14 @@ function DensePinnedList({
                 className="min-w-0 flex-1 text-left"
               >
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 rounded-md bg-accent/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-accent">
+                  <span className="shrink-0 rounded-md bg-[#3c2e7a] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-[#c9c0f0]">
                     {p.article_number ?? i + 1}
                   </span>
-                  <span className="truncate text-[10px] font-medium text-white/90">
+                  <span className="truncate text-[10px] font-medium text-[#e6e3ee]">
                     {articleDisplayTitle(p.article_number, p.heading)}
                   </span>
                 </div>
-                <p className="mt-0.5 truncate text-[9px] text-white/45">
+                <p className="mt-0.5 truncate text-[9px] text-[#8a8497]">
                   {focusMode && pen !== '—' ? pen : previewEssenceLine(p)}
                 </p>
               </button>
@@ -424,7 +308,7 @@ function DensePinnedList({
                 </MiniBtn>
                 <button
                   type="button"
-                  className="rounded px-1.5 text-[10px] text-red-400/85 hover:bg-red-500/10"
+                  className="rounded px-1.5 text-[10px] text-red-400/85 can-hover:hover:bg-red-500/10"
                   onClick={() => onUnpin(p.id)}
                   title="Снять с закрепа"
                 >
@@ -439,13 +323,161 @@ function DensePinnedList({
   )
 }
 
+/** Полоска под шапкой: основные сочетания с короткими подписями (подсказка в title). */
+function OverlayQuickHotkeyStrip({
+  hk,
+  density
+}: {
+  hk: { toggle: string; search: string; clickThrough: string }
+  density: 'compact' | 'normal' | 'comfort'
+}): JSX.Element {
+  const items: { key: string; combo: string; label: string; title: string }[] = [
+    {
+      key: 'toggle',
+      combo: hk.toggle,
+      label: 'оверлей',
+      title: `${hk.toggle} — показать или скрыть оверлей`
+    },
+    {
+      key: 'search',
+      combo: hk.search,
+      label: 'поиск',
+      title: `${hk.search} — фокус в поле поиска по базе`
+    },
+    {
+      key: 'mouse',
+      combo: hk.clickThrough,
+      label: 'мышь → игра',
+      title: `${hk.clickThrough} — клики и курсор уходят в игру, оверлей их не ловит (остаётся на экране)`
+    }
+  ]
+  const pad = density === 'compact' ? 'py-0.5' : density === 'comfort' ? 'py-1.5' : 'py-1'
+  return (
+    <div
+      className={`flex shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b border-[#2a2540] bg-[linear-gradient(105deg,#1c1828_0%,#15121e_42%,#1a1626_100%)] px-2 ${pad} ${ovScroll}`}
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      role="group"
+      aria-label="Основные горячие клавиши"
+    >
+      <span
+        className={`mr-0.5 shrink-0 font-medium uppercase tracking-wider text-[#5c5670] ${
+          density === 'compact' ? 'text-[7px]' : 'text-[8px]'
+        }`}
+      >
+        ⌨
+      </span>
+      {items.map((it) => (
+        <span
+          key={it.key}
+          title={it.title}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-[#322c4d]/85 bg-black/22 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
+            density === 'compact' ? 'px-1 py-px' : 'px-1.5 py-0.5'
+          }`}
+        >
+          <kbd
+            className={`max-w-[9.5rem] truncate font-mono font-semibold tracking-tight text-[#d4cef7] ${
+              density === 'compact' ? 'text-[7px]' : 'text-[8px] sm:text-[9px]'
+            }`}
+          >
+            {it.combo}
+          </kbd>
+          <span
+            className={`max-w-[5.5rem] truncate font-sans normal-case text-[#8a8497] ${
+              density === 'compact' ? 'text-[7px]' : 'text-[8px]'
+            }`}
+          >
+            {it.label}
+          </span>
+        </span>
+      ))}
+      <span
+        className={`ml-auto shrink-0 pl-1 font-sans text-[#5c5670] ${
+          density === 'compact' ? 'text-[7px]' : 'text-[8px]'
+        }`}
+        title="Полный список сочетаний — кнопка «?» внизу справа"
+      >
+        ? внизу
+      </span>
+    </div>
+  )
+}
+
+function OverlayHotkeysModal({
+  hk,
+  onClose
+}: {
+  hk: {
+    toggle: string
+    search: string
+    clickThrough: string
+    cheatsOverlay: string
+    collectionsOverlay: string
+  }
+  onClose: () => void
+}): JSX.Element {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3"
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div
+        className="max-h-[min(80vh,420px)] w-full max-w-md overflow-y-auto rounded-xl border border-[#322c4d] bg-[#1d192a] p-4 shadow-xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <h2 className="text-[12px] font-semibold text-[#e6e3ee]">Сочетания клавиш</h2>
+          <button
+            type="button"
+            className="rounded-md px-2 py-0.5 text-[11px] text-[#8a8497] can-hover:hover:bg-[#2a2540] can-hover:hover:text-[#e6e3ee]"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
+        <ul className="mt-3 space-y-2 text-[10px] leading-relaxed text-[#b8b3cc]">
+          <li>
+            <span className="font-mono text-[#c9c0f0]">{hk.toggle}</span> — показать или скрыть оверлей
+          </li>
+          <li>
+            <span className="font-mono text-[#c9c0f0]">{hk.search}</span> — фокус в поле поиска по базе
+          </li>
+          <li>
+            <span className="font-mono text-[#c9c0f0]">{hk.clickThrough}</span> — мышь: оверлей ↔ игра
+            <p className="mt-1 text-[9px] leading-snug text-[#8a8497]">
+              В режиме «клики в игру» курсор и нажатия не попадают в окно оверлея — они уходят в игру под ним. Оверлей
+              остаётся на экране, но LexPatrol не перехватывает мышь (удобно кликать по HUD игры, не закрывая подсказку).
+              Вернуть клики в оверлей — тем же сочетанием или переключателем «Мышь в оверлее» в настройках оверлея.
+            </p>
+          </li>
+          <li>
+            <span className="font-mono text-[#c9c0f0]">{hk.cheatsOverlay}</span> — окно шпаргалок
+          </li>
+          <li>
+            <span className="font-mono text-[#c9c0f0]">{hk.collectionsOverlay}</span> — окно подборок
+          </li>
+          <li className="text-[#8a8497]">
+            Кнопка 📌 в шапке (без хоткея) — если оверлей оказался под игрой или другим окном, снова вывести его
+            поверх.
+          </li>
+          <li className="text-[#8a8497]">Esc — из деталей статьи или скрыть оверлей</li>
+          <li className="text-[#8a8497]">
+            В режиме «Карточки» стрелки ← → на клавиатуре не переключают закрепы; в режиме «Читать» — переключают.
+          </li>
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 export function OverlayPage(): JSX.Element {
   const [pins, setPins] = useState<Pinned[]>([])
   const [idx, setIdx] = useState(0)
   const [opacity, setOpacity] = useState(0.94)
   const [clickThrough, setClickThrough] = useState(false)
   const [overlayInteractionMode, setOverlayInteractionMode] = useState<OverlayInteractionMode>('game')
-  const [filterLocal, setFilterLocal] = useState('')
   const [globalQ, setGlobalQ] = useState('')
   const debouncedGlobal = useDebounced(globalQ, 280)
   const [tagFilterId, setTagFilterId] = useState('')
@@ -455,8 +487,10 @@ export function OverlayPage(): JSX.Element {
   const [layoutPreset, setLayoutPreset] = useState<OverlayLayoutPreset>('full')
   const [focusMode, setFocusMode] = useState(false)
   const [fontScale, setFontScale] = useState(1)
-  const [toolsExpanded, setToolsExpanded] = useState(true)
+  const [overlayBrightness, setOverlayBrightness] = useState(1)
   const [articleListMode, setArticleListMode] = useState<OverlayArticleListMode>('cards')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [hotkeysModalOpen, setHotkeysModalOpen] = useState(false)
   const [hkDisp, setHkDisp] = useState({
     toggle: 'Ctrl+Shift+Space',
     search: 'Ctrl+Shift+F',
@@ -477,11 +511,12 @@ export function OverlayPage(): JSX.Element {
   /** Просмотр статьи из глобального поиска (не из закрепов) — остаёмся в оверлее. */
   const [searchArticle, setSearchArticle] = useState<Pinned | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const overlayRootRef = useRef<HTMLDivElement>(null)
+  const [overlayDensity, setOverlayDensity] = useState<'compact' | 'normal' | 'comfort'>('normal')
+  const [uiScale, setUiScale] = useState(1)
   const chromeCompact = isChromeCompact(layoutPreset)
   const readingComfort = layoutPreset === 'reading'
   const readingSizeBoost = readingComfort ? 1.085 : 1
-
-  const filterInputRef = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(async () => {
     const rows = (await window.lawHelper.overlay.getPinned()) as Pinned[]
@@ -514,7 +549,9 @@ export function OverlayPage(): JSX.Element {
           if (typeof j.opacity === 'number') nextOpacity = j.opacity
           if (typeof j.focusMode === 'boolean') setFocusMode(j.focusMode)
           if (typeof j.fontScale === 'number') setFontScale(j.fontScale)
-          if (typeof j.toolsExpanded === 'boolean') setToolsExpanded(j.toolsExpanded)
+          if (typeof j.overlayBrightness === 'number') {
+            setOverlayBrightness(Math.min(1.25, Math.max(0.75, j.overlayBrightness)))
+          }
           if (typeof j.cheatSheetMode === 'boolean') setCheatSheetMode(j.cheatSheetMode)
           if (j.articleListMode === 'cards' || j.articleListMode === 'dense') setArticleListMode(j.articleListMode)
         } catch {
@@ -526,6 +563,30 @@ export function OverlayPage(): JSX.Element {
       setClickThrough(fromMain)
       setOverlayInteractionMode(interactionMode)
     })()
+  }, [])
+
+  useEffect(() => {
+    void window.lawHelper.overlay.applyLayoutPreset(layoutPreset)
+  }, [layoutPreset])
+
+  useEffect(() => {
+    const el = overlayRootRef.current
+    if (!el) return
+    const apply = (): void => {
+      const h = el.getBoundingClientRect().height
+      let s = 1
+      if (h > 0 && h < 700) s = 0.92
+      else if (h > 1400) s = 1.08
+      setUiScale(s)
+      el.style.setProperty('--ui-scale', String(s))
+      if (h > 0 && h < 600) setOverlayDensity('compact')
+      else if (h > 800) setOverlayDensity('comfort')
+      else setOverlayDensity('normal')
+    }
+    apply()
+    const ro = new ResizeObserver(() => apply())
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
 
   const changeOverlayInteractionMode = useCallback((mode: OverlayInteractionMode): void => {
@@ -546,7 +607,9 @@ export function OverlayPage(): JSX.Element {
       if (typeof prefs.opacity === 'number') setOpacity(Math.min(1, Math.max(0.28, prefs.opacity)))
       if (typeof prefs.focusMode === 'boolean') setFocusMode(prefs.focusMode)
       if (typeof prefs.fontScale === 'number') setFontScale(Math.min(1.35, Math.max(0.86, prefs.fontScale)))
-      if (typeof prefs.toolsExpanded === 'boolean') setToolsExpanded(prefs.toolsExpanded)
+      if (typeof prefs.overlayBrightness === 'number') {
+        setOverlayBrightness(Math.min(1.25, Math.max(0.75, prefs.overlayBrightness)))
+      }
       if (typeof prefs.cheatSheetMode === 'boolean') setCheatSheetMode(prefs.cheatSheetMode)
       if (prefs.articleListMode === 'cards' || prefs.articleListMode === 'dense') setArticleListMode(prefs.articleListMode)
     })
@@ -556,17 +619,24 @@ export function OverlayPage(): JSX.Element {
   useEffect(() => {
     void window.lawHelper.settings.set(
       UI_KEY,
-      JSON.stringify({ opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode, articleListMode })
+      JSON.stringify({
+        opacity,
+        layoutPreset,
+        focusMode,
+        fontScale,
+        overlayBrightness,
+        cheatSheetMode,
+        articleListMode
+      })
     )
     void window.lawHelper.settings.set('overlay_opacity', String(opacity))
-  }, [opacity, layoutPreset, focusMode, fontScale, toolsExpanded, cheatSheetMode, articleListMode])
+  }, [opacity, layoutPreset, focusMode, fontScale, overlayBrightness, cheatSheetMode, articleListMode])
 
   useEffect(() => {
     void refresh()
     const off = window.lawHelper.overlay.onPinsUpdated(() => void refresh())
     const offSearch = window.lawHelper.overlay.onFocusSearch(() => {
-      setLayoutPreset('full')
-      setToolsExpanded(true)
+      setSettingsOpen(false)
       searchInputRef.current?.focus()
       setGlobalOpen(true)
     })
@@ -592,6 +662,17 @@ export function OverlayPage(): JSX.Element {
   }, [clickThrough])
 
   useEffect(() => {
+    const onVis = (): void => {
+      if (document.visibilityState === 'hidden') {
+        setSettingsOpen(false)
+        setHotkeysModalOpen(false)
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
+
+  useEffect(() => {
     const q = debouncedGlobal.trim()
     if (q.length < 2) {
       setGlobalHits([])
@@ -607,9 +688,18 @@ export function OverlayPage(): JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const tag = (e.target as HTMLElement)?.tagName
-      const inField = tag === 'INPUT' || tag === 'TEXTAREA'
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+
       if (e.key === 'Escape') {
         e.preventDefault()
+        if (hotkeysModalOpen) {
+          setHotkeysModalOpen(false)
+          return
+        }
+        if (settingsOpen) {
+          setSettingsOpen(false)
+          return
+        }
         if (searchArticle) {
           setSearchArticle(null)
           return
@@ -621,6 +711,19 @@ export function OverlayPage(): JSX.Element {
         })
         return
       }
+
+      if (!inField && (e.ctrlKey || e.metaKey) && e.key === ',' && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        setSettingsOpen((o) => !o)
+        return
+      }
+
+      if (!inField && (e.key === '?' || (e.key === '/' && e.shiftKey))) {
+        e.preventDefault()
+        setHotkeysModalOpen(true)
+        return
+      }
+
       if (inField) return
       if (cheatSheetMode) return
       if (e.key === 'ArrowLeft') {
@@ -634,7 +737,7 @@ export function OverlayPage(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [pins.length, cheatSheetMode, searchArticle])
+  }, [pins.length, cheatSheetMode, searchArticle, settingsOpen, hotkeysModalOpen])
 
   useEffect(() => {
     if (!cheatSheetMode) {
@@ -650,7 +753,7 @@ export function OverlayPage(): JSX.Element {
   const current = pins[idx] ?? null
 
   const filteredPins = useMemo(() => {
-    const q = filterLocal.trim().toLowerCase()
+    const q = globalQ.trim().toLowerCase()
     if (!q) return pins
     return pins.filter(
       (p) =>
@@ -660,7 +763,7 @@ export function OverlayPage(): JSX.Element {
         (p.penalty_hint?.toLowerCase().includes(q) ?? false) ||
         (p.document_title?.toLowerCase().includes(q) ?? false)
     )
-  }, [pins, filterLocal])
+  }, [pins, globalQ])
 
   const detailPin = useMemo(
     () => (detailId ? pins.find((p) => p.id === detailId) ?? null : null),
@@ -689,28 +792,28 @@ export function OverlayPage(): JSX.Element {
     const raw = current.body_clean
     if (focusMode) {
       if (isReferenceImportDoc(current)) {
-        if (!filterLocal.trim()) return raw
-        return filterBody(raw, filterLocal)
+        if (!globalQ.trim()) return raw
+        return filterBody(raw, globalQ)
       }
       return extractPenaltyHints(raw, 36)
     }
-    if (!filterLocal.trim()) return raw
-    return filterBody(raw, filterLocal)
-  }, [current, focusMode, filterLocal])
+    if (!globalQ.trim()) return raw
+    return filterBody(raw, globalQ)
+  }, [current, focusMode, globalQ])
 
   const detailBodyDisplay = useMemo(() => {
     if (!activeDetailArticle) return ''
     const raw = activeDetailArticle.body_clean
     if (focusMode) {
       if (isReferenceImportDoc(activeDetailArticle)) {
-        if (!filterLocal.trim()) return raw
-        return filterBody(raw, filterLocal)
+        if (!globalQ.trim()) return raw
+        return filterBody(raw, globalQ)
       }
       return extractPenaltyHints(raw, 48)
     }
-    if (!filterLocal.trim()) return raw
-    return filterBody(raw, filterLocal)
-  }, [activeDetailArticle, focusMode, filterLocal])
+    if (!globalQ.trim()) return raw
+    return filterBody(raw, globalQ)
+  }, [activeDetailArticle, focusMode, globalQ])
 
   async function unpin(id: string): Promise<void> {
     await window.lawHelper.overlay.unpin(id)
@@ -743,339 +846,151 @@ export function OverlayPage(): JSX.Element {
     void window.lawHelper.overlay.raise()
   }
 
+  const footerCounter = pins.length > 0 ? `${idx + 1}/${pins.length}` : '—'
+
   return (
     <div
-      className="box-border flex h-full min-h-0 max-h-full w-full max-w-full flex-1 flex-col rounded-xl border border-white/[0.12] bg-[#0a0d12] text-app shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_24px_64px_rgba(0,0,0,0.55)]"
-      style={{ WebkitFontSmoothing: 'antialiased' } as React.CSSProperties}
+      ref={overlayRootRef}
+      data-overlay-density={overlayDensity}
+      className="lex-overlay-root box-border flex h-full min-h-0 max-h-full w-full max-w-full flex-1 flex-col overflow-hidden rounded-xl border border-[#322c4d] bg-[#15121e] text-[#e6e3ee] shadow-[0_0_0_1px_rgba(90,74,176,0.12),0_24px_64px_rgba(0,0,0,0.55)]"
+      style={
+        {
+          WebkitFontSmoothing: 'antialiased',
+          filter: `brightness(${overlayBrightness})`,
+          ['--ui-scale' as string]: String(uiScale)
+        } as React.CSSProperties
+      }
     >
-      {/* Title bar */}
+      {hotkeysModalOpen ? <OverlayHotkeysModal hk={hkDisp} onClose={() => setHotkeysModalOpen(false)} /> : null}
+
       <header
-        className={`shrink-0 border-b border-white/[0.08] bg-black/20 px-2 ${chromeCompact ? 'py-1.5' : 'py-2'}`}
+        className="flex h-9 shrink-0 items-center justify-between border-b border-[#2a2540] bg-[#15121e] px-2"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        {chromeCompact ? (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2 pl-0.5">
-                <span className="truncate text-[10px] font-bold uppercase tracking-[0.12em] text-white/95">LexPatrol</span>
-                <span className="text-[9px] text-white/35">
-                  {layoutPreset === 'reading' ? 'чтение' : 'компакт'}
-                </span>
-              </div>
-              <div
-                className="flex shrink-0 flex-wrap items-center justify-end gap-1"
-                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              >
+        <span className="select-none text-[11px] font-bold uppercase tracking-[0.14em] text-[#e6e3ee]">LEXPATROL</span>
+        <div
+          className="flex shrink-0 items-center gap-0.5"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <button
+            type="button"
+            title="Настройки (Ctrl+,)"
+            className={`inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md px-2 py-1 text-[13px] leading-none transition ${
+              settingsOpen ? 'bg-[#3c2e7a] text-[#c9c0f0]' : 'text-[#b8b3cc] can-hover:hover:bg-[#1d192a]'
+            }`}
+            onClick={() => setSettingsOpen((o) => !o)}
+          >
+            ⚙
+          </button>
+          <button
+            type="button"
+            title="Если оверлей ушёл под игру или другое окно — нажмите, чтобы снова показать его поверх (не мышь в игру и не закреп позиции)"
+            className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md px-2 py-1 text-[13px] leading-none text-[#b8b3cc] can-hover:hover:bg-[#1d192a]"
+            onClick={() => void window.lawHelper.overlay.raise()}
+          >
+            📌
+          </button>
+          <button
+            type="button"
+            title="Скрыть (Esc)"
+            className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md px-2 py-1 text-[13px] leading-none text-[#b8b3cc] can-hover:hover:bg-red-500/10 can-hover:hover:text-red-200"
+            onClick={() => void window.lawHelper.overlay.hide()}
+          >
+            ✕
+          </button>
+        </div>
+      </header>
+
+      <OverlayQuickHotkeyStrip hk={hkDisp} density={overlayDensity} />
+
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          className={`flex min-h-0 flex-1 flex-col gap-2 px-2 pb-2 pt-1.5 transition-opacity duration-200 ease-out ${
+            settingsOpen ? 'pointer-events-none opacity-0' : 'opacity-100'
+          }`}
+        >
+          <div className="relative shrink-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <div className="flex items-center gap-2 rounded-lg border border-[#322c4d] bg-[#1d192a] px-2 py-1.5">
+              <span className="shrink-0 text-[12px] text-[#8a8497]" aria-hidden>
+                ⌕
+              </span>
+              <input
+                ref={searchInputRef}
+                id="overlay-search"
+                className="min-w-0 flex-1 bg-transparent text-[11px] text-[#e6e3ee] outline-none placeholder:text-[#6b6582]"
+                placeholder="Поиск по базе…"
+                value={globalQ}
+                onChange={(e) => {
+                  setGlobalQ(e.target.value)
+                  setGlobalOpen(true)
+                }}
+                onFocus={() => setGlobalOpen(true)}
+              />
+              <span className="hidden shrink-0 font-mono text-[9px] text-[#6b6582] sm:inline">{hkDisp.search}</span>
+              {globalQ ? (
                 <button
                   type="button"
-                  title="Полная панель: поиск, фильтр, настройки"
-                  className="rounded-md border border-accent/35 bg-accent/15 px-2 py-1 text-[9px] font-semibold text-accent hover:bg-accent/25"
-                  onClick={() => setLayoutPreset('full')}
+                  className="shrink-0 text-[10px] text-[#8a8497] can-hover:hover:text-[#e6e3ee]"
+                  onClick={() => {
+                    setGlobalQ('')
+                    setGlobalHits([])
+                  }}
                 >
-                  Панель
+                  очистить
                 </button>
-                <ToolBtn title="Авто-позиция: компактно справа сверху" onClick={() => void window.lawHelper.overlay.dock('compact-top-right')}>
-                  Авто
-                </ToolBtn>
-                <ToolBtn title="Поверх всех окон" onClick={() => void window.lawHelper.overlay.raise()}>
-                  ⧈
-                </ToolBtn>
-                <ToolBtn title="Слева" onClick={() => void window.lawHelper.overlay.dock('left')}>
-                  ◀
-                </ToolBtn>
-                <ToolBtn title="Справа" onClick={() => void window.lawHelper.overlay.dock('right')}>
-                  ▶
-                </ToolBtn>
-                <ToolBtn title="Угол" onClick={() => void window.lawHelper.overlay.dock('top-right')}>
-                  ⤢
-                </ToolBtn>
-                <ToolBtn title="Скрыть (Esc)" onClick={() => void window.lawHelper.overlay.hide()} accent>
-                  ✕
-                </ToolBtn>
-              </div>
+              ) : null}
             </div>
-            <MouseModeRow
-              clickThrough={clickThrough}
-              onOverlay={() => setClickThrough(false)}
-              onGame={() => setClickThrough(true)}
-              variant="compact"
-              hotkeyMouse={hkDisp.clickThrough}
-            />
-            <OverlayInteractionModeRow
-              mode={overlayInteractionMode}
-              onChange={changeOverlayInteractionMode}
-              variant="compact"
-            />
-            <OverlayStatusStrip
-              clickThrough={clickThrough}
-              mode={overlayInteractionMode}
-              hotkeyMouse={hkDisp.clickThrough}
-              hotkeyToggle={hkDisp.toggle}
-              compact
-            />
-          </>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2 pl-1">
-                <span className="truncate text-[11px] font-bold uppercase tracking-[0.12em] text-white/95">LexPatrol</span>
-                <span className="hidden text-[10px] text-white/35 sm:inline">·</span>
-                <span className="hidden truncate text-[10px] text-app-muted sm:inline">оверлей</span>
-              </div>
-              <div
-                className="flex shrink-0 flex-wrap items-center justify-end gap-1"
-                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            <div className="mt-1.5">
+              <select
+                className="w-full rounded-lg border border-[#322c4d] bg-[#1d192a] px-2 py-1.5 text-[10px] text-[#e6e3ee] outline-none focus:border-[#5a4ab0]"
+                value={tagFilterId}
+                onChange={(e) => setTagFilterId(e.target.value)}
               >
-                <ToolBtn title="Авто-позиция: компактно справа сверху" onClick={() => void window.lawHelper.overlay.dock('compact-top-right')}>
-                  Авто
-                </ToolBtn>
-                <ToolBtn title="Поверх всех окон" onClick={() => void window.lawHelper.overlay.raise()}>
-                  ⧈
-                </ToolBtn>
-                <ToolBtn title="Слева" onClick={() => void window.lawHelper.overlay.dock('left')}>
-                  ◀
-                </ToolBtn>
-                <ToolBtn title="Справа" onClick={() => void window.lawHelper.overlay.dock('right')}>
-                  ▶
-                </ToolBtn>
-                <ToolBtn title="Угол" onClick={() => void window.lawHelper.overlay.dock('top-right')}>
-                  ⤢
-                </ToolBtn>
-                <ToolBtn title="Скрыть (Esc)" onClick={() => void window.lawHelper.overlay.hide()} accent>
-                  ✕
-                </ToolBtn>
-              </div>
+                <option value="">Все статьи</option>
+                {tagOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             </div>
-
-            <MouseModeRow
-              clickThrough={clickThrough}
-              onOverlay={() => setClickThrough(false)}
-              onGame={() => setClickThrough(true)}
-              variant="full"
-              hotkeyMouse={hkDisp.clickThrough}
-            />
-            <OverlayInteractionModeRow
-              mode={overlayInteractionMode}
-              onChange={changeOverlayInteractionMode}
-              variant="full"
-            />
-            <OverlayStatusStrip
-              clickThrough={clickThrough}
-              mode={overlayInteractionMode}
-              hotkeyMouse={hkDisp.clickThrough}
-              hotkeyToggle={hkDisp.toggle}
-              compact={false}
-            />
-
-            {/* Global search */}
-        <div className="relative mt-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <div className="flex items-center gap-2 rounded-lg border border-accent/25 bg-black/40 px-2 py-1.5 ring-1 ring-white/5">
-            <span className="text-[10px] text-accent/90">⌕</span>
-            <input
-              ref={searchInputRef}
-              id="overlay-search"
-              className="min-w-0 flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/25"
-              placeholder="Поиск по всей базе…"
-              value={globalQ}
-              onChange={(e) => {
-                setGlobalQ(e.target.value)
-                setGlobalOpen(true)
-              }}
-              onFocus={() => setGlobalOpen(true)}
-            />
-            {globalQ && (
-              <button
-                type="button"
-                className="text-[10px] text-white/40 hover:text-white"
-                onClick={() => {
-                  setGlobalQ('')
-                  setGlobalHits([])
-                }}
+            {globalOpen && globalHits.length > 0 && globalQ.trim().length >= 2 && (
+              <ul
+                className={`absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-auto rounded-lg border border-[#322c4d] bg-[#1d192a] py-1 shadow-xl ${ovScroll}`}
+                onMouseDown={(e) => e.stopPropagation()}
               >
-                очистить
-              </button>
+                {globalHits.slice(0, 8).map((h) => (
+                  <li key={h.article_id}>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 text-left text-[11px] can-hover:hover:bg-[#2a2540]"
+                      onClick={() => void openHit(h)}
+                    >
+                      <div className="font-medium text-[#e6e3ee]">{h.heading}</div>
+                      <div className="truncate text-[10px] text-[#8a8497]">{h.document_title}</div>
+                    </button>
+                  </li>
+                ))}
+                <li className="border-t border-[#2a2540] px-2 py-1 text-[9px] text-[#6b6582]">
+                  Просмотр статьи — в этом окне оверлея
+                </li>
+              </ul>
             )}
           </div>
-          <div className="mt-1 flex items-center gap-2 rounded-lg border border-white/5 bg-black/25 px-2 py-1">
-            <span className="shrink-0 text-[9px] uppercase tracking-wide text-white/40">тег FTS</span>
-            <select
-              className="min-w-0 flex-1 rounded border border-white/10 bg-black/40 px-1 py-0.5 text-[10px] text-white outline-none"
-              value={tagFilterId}
-              onChange={(e) => setTagFilterId(e.target.value)}
-            >
-              <option value="">Все статьи</option>
-              {tagOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          {globalOpen && globalHits.length > 0 && globalQ.trim().length >= 2 && (
-            <ul
-              className={`absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-auto rounded-lg border border-white/10 bg-[#0d1118] py-1 shadow-xl ${ovScroll}`}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              {globalHits.slice(0, 8).map((h) => (
-                <li key={h.article_id}>
-                  <button
-                    type="button"
-                    className="w-full px-3 py-2 text-left text-[11px] hover:bg-white/10"
-                    onClick={() => void openHit(h)}
-                  >
-                    <div className="font-medium text-white/95">{h.heading}</div>
-                    <div className="truncate text-[10px] text-app-muted">{h.document_title}</div>
-                  </button>
-                </li>
-              ))}
-              <li className="border-t border-white/5 px-2 py-1 text-[9px] text-app-muted">
-                Просмотр статьи — в этом окне оверлея
-              </li>
-            </ul>
-          )}
-        </div>
-
-        {toolsExpanded && (
-          <div
-            className="mt-2 space-y-2 border-t border-white/[0.06] pt-2"
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          >
-            <label className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-              <span className="shrink-0 text-[9px] uppercase tracking-wide text-white/40">фильтр</span>
-              <input
-                ref={filterInputRef}
-                className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 text-[11px] text-white outline-none focus:border-accent/50"
-                placeholder="Отбор карточек по слову в тексте…"
-                value={filterLocal}
-                onChange={(e) => setFilterLocal(e.target.value)}
-              />
-            </label>
-
-            <div>
-              <div className="text-[9px] font-medium uppercase tracking-wide text-white/45">Режим закрепов</div>
-              <div className="mt-1 grid grid-cols-3 rounded-lg border border-white/10 bg-black/40 p-0.5">
-                <button
-                  type="button"
-                  title="Список карточек (суть, залог, наказание) и детали по клику"
-                  onClick={() => {
-                    setCheatSheetMode(true)
-                    setArticleListMode('cards')
-                  }}
-                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
-                    cheatSheetMode && articleListMode === 'cards'
-                      ? 'bg-accent/35 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
-                      : 'text-white/50 hover:bg-white/[0.06] hover:text-white/85'
-                  }`}
-                >
-                  Карточки
-                </button>
-                <button
-                  type="button"
-                  title="Плотный список как каналы/сообщения: больше статей на экране"
-                  onClick={() => {
-                    setCheatSheetMode(true)
-                    setArticleListMode('dense')
-                  }}
-                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
-                    cheatSheetMode && articleListMode === 'dense'
-                      ? 'bg-accent/35 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
-                      : 'text-white/50 hover:bg-white/[0.06] hover:text-white/85'
-                  }`}
-                >
-                  Список
-                </button>
-                <button
-                  type="button"
-                  title="Одна статья целиком; стрелки ← → переключают закрепы"
-                  onClick={() => setCheatSheetMode(false)}
-                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
-                    !cheatSheetMode
-                      ? 'bg-accent/35 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
-                      : 'text-white/50 hover:bg-white/[0.06] hover:text-white/85'
-                  }`}
-                >
-                  Читать
-                </button>
-              </div>
-              <p className="mt-1 text-[9px] leading-snug text-white/42">
-                {cheatSheetMode && articleListMode === 'dense' ? (
-                  <>
-                    Плотный список удобен, когда закрепов много: больше строк на экране, быстрый выбор слева и сортировка рядом.
-                  </>
-                ) : cheatSheetMode ? (
-                  <>
-                    Обзор по карточкам, полный текст в окне деталей. Переключение между статьями —{' '}
-                    <span className="text-white/55">в списке или чипах на карточке</span> (стрелки клавиатуры здесь не
-                    листают закрепы).
-                  </>
-                ) : (
-                  <>
-                    Полный текст одной статьи. <span className="text-white/55">← →</span> или точки внизу — между
-                    закреплёнными статьями.
-                  </>
-                )}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2 border-t border-white/[0.05] pt-2 min-[520px]:grid-cols-2">
-              <div className="min-w-0">
-                <LayoutPresetControl value={layoutPreset} onChange={setLayoutPreset} />
-              </div>
-              <OverlayPositionControl />
-              <div className="min-w-0 min-[520px]:col-span-2">
-                <OverlayOptionToggle
-                  label="Фокус"
-                  hint="Короче превью и текст санкций. Детали становятся плотнее."
-                  checked={focusMode}
-                  onChange={setFocusMode}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 border-t border-white/[0.05] pt-2">
-              <label className="flex min-w-0 items-center gap-1.5 text-[10px] text-app-muted">
-                <span className="text-white/50">A</span>
-                <input
-                  type="range"
-                  min={0.75}
-                  max={1.35}
-                  step={0.05}
-                  value={fontScale}
-                  onChange={(e) => setFontScale(Number(e.target.value))}
-                  className="h-1 min-w-0 flex-1 accent-accent"
-                />
-              </label>
-              <label className="flex min-w-0 items-center gap-1.5 text-[10px] text-app-muted">
-                <span className="text-white/50">◐</span>
-                <input
-                  type="range"
-                  min={0.28}
-                  max={1}
-                  step={0.01}
-                  value={opacity}
-                  onChange={(e) => setOpacity(Number(e.target.value))}
-                  className="h-1 min-w-0 flex-1 accent-accent"
-                />
-              </label>
-            </div>
-          </div>
-        )}
-
-            <button
-              type="button"
-              className="mt-1 w-full py-0.5 text-[9px] text-white/35 hover:text-white/60"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              onClick={() => setToolsExpanded((e) => !e)}
-            >
-              {toolsExpanded ? '▼ свернуть панель' : '▲ развернуть панель'}
-            </button>
-          </>
-        )}
-      </header>
 
       <div
         className={`flex min-h-0 flex-1 ${
-          chromeCompact ? (readingComfort ? 'p-1.5' : 'p-1') : 'p-2'
+          overlayDensity === 'compact'
+            ? chromeCompact
+              ? 'p-1'
+              : 'p-1.5'
+            : overlayDensity === 'comfort' && !chromeCompact
+              ? 'p-2.5'
+              : chromeCompact
+                ? readingComfort
+                  ? 'p-1.5'
+                  : 'p-1'
+                : 'p-2'
         }`}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
@@ -1092,41 +1007,19 @@ export function OverlayPage(): JSX.Element {
             </div>
           ) : cheatSheetMode && !detailId && !searchArticle ? (
             <div
-              className="flex h-full flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-gradient-to-b from-[#0c1018]/95 to-black/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-              style={{ fontSize: `${11 * fontScale * readingSizeBoost}px` }}
+              className="flex h-full flex-col overflow-hidden rounded-xl border border-[#322c4d] bg-[#1d192a] shadow-[inset_0_1px_0_rgba(90,74,176,0.08)]"
+              style={{ fontSize: `${11 * fontScale * readingSizeBoost * uiScale}px` }}
             >
               <div
-                className={`shrink-0 border-b border-white/[0.06] ${
+                className={`shrink-0 border-b border-[#2a2540] ${
                   chromeCompact ? (readingComfort ? 'px-2.5 py-1.5' : 'px-2 py-1') : 'px-3 py-2'
                 }`}
               >
-                {chromeCompact ? (
-                  <div className="flex flex-col gap-1">
-                    {readingComfort ? (
-                      <p className="text-[9px] leading-snug text-accent/85">
-                        Режим чтения — крупнее текст; поиск по базе — кнопка «Панель» или горячая клавиша.
-                      </p>
-                    ) : null}
-                    <div className="flex justify-end">
-                      <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[9px] tabular-nums text-white/45">
-                        {ruArticlesCount(pins.length)}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="text-[10px] leading-snug text-white/70">
-                        <span className="text-white/90">Карточки</span> — суть одним взглядом;{' '}
-                        <span className="text-accent/90">клик</span> — полный текст.
-                      </p>
-                      <span className="shrink-0 rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[9px] tabular-nums text-white/50">
-                        {ruArticlesCount(pins.length)}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[9px] text-app-muted">Esc — назад из деталей · скрыть окно — Esc ещё раз</p>
-                  </>
-                )}
+                <div className="flex justify-end">
+                  <span className="rounded-md border border-[#322c4d] bg-[#1d192a] px-1.5 py-0.5 text-[9px] tabular-nums text-[#8a8497]">
+                    {ruArticlesCount(pins.length)}
+                  </span>
+                </div>
               </div>
               <div
                 className={`min-h-0 flex-1 overflow-auto pb-2 pt-2 ${readingComfort ? 'px-2.5' : 'px-2'} ${ovScroll}`}
@@ -1165,10 +1058,10 @@ export function OverlayPage(): JSX.Element {
                       return (
                         <li key={p.id}>
                           <div
-                            className={`overflow-hidden rounded-xl border bg-gradient-to-br from-black/50 to-black/25 shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition ${
+                            className={`overflow-hidden rounded-xl border bg-[#1d192a] shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition ${
                               open
-                                ? 'border-accent/40 ring-1 ring-accent/25'
-                                : 'border-white/[0.09] hover:border-accent/25 hover:bg-white/[0.03]'
+                                ? 'border-[#5a4ab0] ring-1 ring-[#5a4ab0]/40'
+                                : 'border-[#322c4d] can-hover:hover:border-[#5a4ab0]/50 can-hover:hover:bg-[#15121e]'
                             }`}
                           >
                             <button
@@ -1185,16 +1078,16 @@ export function OverlayPage(): JSX.Element {
                               }`}
                             >
                               <div className="flex items-start justify-between gap-2">
-                                <span className="shrink-0 rounded-md bg-accent/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent">
+                                <span className="shrink-0 rounded-md bg-[#3c2e7a] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#c9c0f0]">
                                   {p.article_number ?? '—'}
                                 </span>
-                                <span className="text-[11px] text-white/25 transition group-hover:text-accent/80">→</span>
+                                <span className="text-[11px] text-[#6b6582] transition can-hover:group-hover:text-[#8a8497]">→</span>
                               </div>
-                              <div className="mt-1.5 line-clamp-2 text-[11px] font-medium leading-snug text-white">
+                              <div className="mt-1.5 line-clamp-2 text-[11px] font-medium leading-snug text-[#e6e3ee]">
                                 {articleDisplayTitle(p.article_number, p.heading)}
                               </div>
                               <p
-                                className={`mt-1.5 text-[10px] leading-relaxed text-white/55 ${
+                                className={`mt-1.5 text-[10px] leading-relaxed text-[#b8b3cc] ${
                                   focusMode ? 'line-clamp-3' : readingComfort ? 'line-clamp-3' : 'line-clamp-2'
                                 }`}
                               >
@@ -1202,20 +1095,20 @@ export function OverlayPage(): JSX.Element {
                               </p>
                               <div className="mt-2 flex flex-wrap gap-1.5">
                                 {!focusMode && bail ? (
-                                  <span className="max-w-full truncate rounded-md border border-sky-500/20 bg-sky-500/10 px-1.5 py-0.5 text-[9px] text-sky-100/90">
+                                  <span className="max-w-full truncate rounded-md bg-[#4a2418] px-1.5 py-0.5 text-[9px] text-[#f0b89e]">
                                     Залог: {bail.length > 56 ? `${bail.slice(0, 53)}…` : bail}
                                   </span>
                                 ) : null}
                                 {pen && pen !== '—' ? (
                                   <span
-                                    className={`max-w-full truncate rounded-md border px-1.5 py-0.5 text-[9px] ${
+                                    className={`max-w-full truncate rounded-md px-1.5 py-0.5 text-[9px] ${
                                       isReferenceImportDoc(p)
                                         ? focusMode
-                                          ? 'border-zinc-400/35 bg-zinc-500/15 font-medium text-zinc-100/95'
-                                          : 'border-white/[0.12] bg-white/[0.06] text-white/78'
+                                          ? 'bg-zinc-500/20 font-medium text-zinc-100/95'
+                                          : 'bg-[#2a2540] text-[#b8b3cc]'
                                         : focusMode
-                                          ? 'border-amber-400/45 bg-amber-500/15 font-medium text-amber-50/95'
-                                          : 'border-amber-500/20 bg-amber-500/10 text-amber-100/90'
+                                          ? 'bg-amber-500/20 font-medium text-amber-50/95'
+                                          : 'bg-[#423814] text-[#e8c889]'
                                     }`}
                                   >
                                     {isReferenceImportDoc(p)
@@ -1229,7 +1122,7 @@ export function OverlayPage(): JSX.Element {
                             </button>
                             {i >= 0 ? (
                               <div
-                                className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-2 py-1"
+                                className="flex items-center justify-between gap-2 border-t border-[#2a2540] px-2 py-1"
                                 onMouseDown={(e) => e.preventDefault()}
                               >
                                 <span className="pl-1 text-[9px] tabular-nums text-white/35">
@@ -1248,7 +1141,7 @@ export function OverlayPage(): JSX.Element {
                                   </MiniBtn>
                                   <button
                                     type="button"
-                                    className="rounded px-1.5 text-[10px] text-red-400/85 hover:bg-red-500/10"
+                                    className="rounded px-1.5 text-[10px] text-red-400/85 can-hover:hover:bg-red-500/10"
                                     onClick={() => void unpin(p.id)}
                                     title="Снять с закрепа"
                                   >
@@ -1270,6 +1163,7 @@ export function OverlayPage(): JSX.Element {
               pin={activeDetailArticle}
               bodyText={detailBodyDisplay}
               fontScale={fontScale}
+              uiScale={uiScale}
               compact={chromeCompact}
               readingComfort={readingComfort}
               focusMode={focusMode}
@@ -1286,7 +1180,7 @@ export function OverlayPage(): JSX.Element {
             <div
               className="flex h-full flex-col rounded-xl border border-white/[0.08] bg-gradient-to-b from-black/40 to-black/25 p-3"
               style={{
-                fontSize: `${12 * fontScale * readingSizeBoost}px`,
+                fontSize: `${12 * fontScale * readingSizeBoost * uiScale}px`,
                 lineHeight: chromeCompact ? (readingComfort ? 1.48 : 1.38) : 1.55
               }}
             >
@@ -1301,7 +1195,7 @@ export function OverlayPage(): JSX.Element {
                       className={`shrink-0 rounded-lg border px-2 py-1 text-[9px] transition ${
                         i === idx
                           ? 'border-accent/40 bg-accent/15 text-white'
-                          : 'border-white/10 bg-black/30 text-white/55 hover:border-white/20 hover:text-white/85'
+                          : 'border-white/10 bg-black/30 text-white/55 can-hover:hover:border-white/20 can-hover:hover:text-white/85'
                       }`}
                     >
                       {p.article_number?.trim() || `#${i + 1}`}
@@ -1325,7 +1219,7 @@ export function OverlayPage(): JSX.Element {
                         key={i}
                         type="button"
                         title={`Статья ${i + 1}`}
-                        className={`h-1.5 w-1.5 rounded-full transition ${i === idx ? 'bg-accent' : 'bg-white/20 hover:bg-white/40'}`}
+                        className={`h-1.5 w-1.5 rounded-full transition ${i === idx ? 'bg-accent' : 'bg-white/20 can-hover:hover:bg-white/40'}`}
                         onClick={() => setIdx(i)}
                       />
                     ))}
@@ -1340,39 +1234,173 @@ export function OverlayPage(): JSX.Element {
           ) : null}
         </section>
       </div>
+        </div>
+
+        <div
+          className={`absolute inset-0 z-10 flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#15121e] px-2 pb-3 pt-2 transition-opacity duration-200 ease-out ${ovScroll} ${
+            settingsOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <div className="mb-2 flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-[#322c4d] bg-[#1d192a] px-2 py-1 text-[10px] font-medium text-[#e6e3ee] can-hover:hover:border-[#5a4ab0]"
+              onClick={() => setSettingsOpen(false)}
+              title="Назад"
+            >
+              ← Назад
+            </button>
+          </div>
+          <div className="min-w-0 space-y-3">
+            <LayoutPresetControl value={layoutPreset} onChange={setLayoutPreset} />
+            <OverlayPositionControl />
+            <label className="block">
+              <span className="text-[9px] font-medium uppercase tracking-wide text-[#6b6582]">Прозрачность</span>
+              <input
+                type="range"
+                min={0.28}
+                max={1}
+                step={0.01}
+                value={opacity}
+                onChange={(e) => setOpacity(Number(e.target.value))}
+                className="lex-ov-range mt-1 w-full accent-[#5a4ab0]"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[9px] font-medium uppercase tracking-wide text-[#6b6582]">Яркость</span>
+              <input
+                type="range"
+                min={0.75}
+                max={1.25}
+                step={0.01}
+                value={overlayBrightness}
+                onChange={(e) => setOverlayBrightness(Number(e.target.value))}
+                className="lex-ov-range mt-1 w-full accent-[#5a4ab0]"
+              />
+            </label>
+            <div className="border-t border-[#2a2540] pt-3" />
+            <div className="rounded-lg border border-[#322c4d] bg-[#1d192a] px-2 py-2">
+              <label
+                className="flex cursor-pointer items-center justify-between gap-2"
+                title={`Включено — кликаете по оверлею. Выключено или ${hkDisp.clickThrough} — курсор и клики идут в игру, оверлей их не ловит.`}
+              >
+                <span className="text-[10px] font-medium text-[#e6e3ee]">Мышь в оверлее</span>
+                <input
+                  type="checkbox"
+                  className="accent-[#5a4ab0]"
+                  checked={!clickThrough}
+                  onChange={(e) => setClickThrough(!e.target.checked)}
+                />
+              </label>
+              <p className="mt-1.5 text-[9px] leading-relaxed text-[#8a8497]">
+                <span className="font-mono text-[#6b6582]">{hkDisp.clickThrough}</span> — переключить: когда мышь «в
+                игру», курсор не остаётся на оверлее — ввод уходит в игру под окном LexPatrol; оверлей виден, но не
+                забирает клики на себя.
+              </p>
+            </div>
+            <OverlayOptionToggle
+              label="Фокус режим"
+              hint=""
+              title="Короче превью и текст санкций; детали плотнее"
+              checked={focusMode}
+              onChange={setFocusMode}
+            />
+            <OverlayInteractionModeRow mode={overlayInteractionMode} onChange={changeOverlayInteractionMode} />
+            <div>
+              <div className="text-[9px] font-medium uppercase tracking-wide text-[#6b6582]">Закрепы</div>
+              <div className="mt-1 grid grid-cols-3 rounded-lg border border-[#322c4d] bg-[#1d192a] p-0.5">
+                <button
+                  type="button"
+                  title="Карточки: суть, залог, наказание; клик — полный текст"
+                  onClick={() => {
+                    setCheatSheetMode(true)
+                    setArticleListMode('cards')
+                  }}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
+                    cheatSheetMode && articleListMode === 'cards'
+                      ? 'bg-[#3c2e7a] text-[#e6e3ee] shadow-[inset_0_0_0_1px_#5a4ab0]'
+                      : 'text-[#8a8497] can-hover:hover:bg-[#2a2540]'
+                  }`}
+                >
+                  Карточки
+                </button>
+                <button
+                  type="button"
+                  title="Плотный список — больше статей на экране"
+                  onClick={() => {
+                    setCheatSheetMode(true)
+                    setArticleListMode('dense')
+                  }}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
+                    cheatSheetMode && articleListMode === 'dense'
+                      ? 'bg-[#3c2e7a] text-[#e6e3ee] shadow-[inset_0_0_0_1px_#5a4ab0]'
+                      : 'text-[#8a8497] can-hover:hover:bg-[#2a2540]'
+                  }`}
+                >
+                  Список
+                </button>
+                <button
+                  type="button"
+                  title="Одна статья; ← → между закрепами"
+                  onClick={() => setCheatSheetMode(false)}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition ${
+                    !cheatSheetMode ? 'bg-[#3c2e7a] text-[#e6e3ee] shadow-[inset_0_0_0_1px_#5a4ab0]' : 'text-[#8a8497] can-hover:hover:bg-[#2a2540]'
+                  }`}
+                >
+                  Читать
+                </button>
+              </div>
+            </div>
+            <label className="flex items-center gap-2">
+              <span className="w-4 text-center text-[10px] text-[#6b6582]">A</span>
+              <input
+                type="range"
+                min={0.75}
+                max={1.35}
+                step={0.05}
+                value={fontScale}
+                onChange={(e) => setFontScale(Number(e.target.value))}
+                className="lex-ov-range h-1 min-w-0 flex-1 accent-[#5a4ab0]"
+              />
+            </label>
+            <button
+              type="button"
+              className="w-full rounded-lg border border-[#322c4d] bg-[#1d192a] py-2 text-[10px] font-medium text-[#b8b3cc] can-hover:hover:border-[#5a4ab0] can-hover:hover:text-[#e6e3ee]"
+              onClick={() => setHotkeysModalOpen(true)}
+            >
+              Все сочетания клавиш…
+            </button>
+          </div>
+        </div>
+      </div>
 
       <footer
-        className="shrink-0 border-t border-white/[0.06] bg-black/25 px-2 py-1.5 text-[9px] leading-relaxed text-white/40"
+        className={`flex shrink-0 items-center border-t border-[#2a2540] bg-[#15121e] px-2 text-[9px] text-[#8a8497] ${
+          overlayDensity === 'compact' ? 'h-6 justify-end' : 'h-7 justify-between'
+        }`}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        {chromeCompact ? (
-          <>
-            <span className="text-white/55">⌨</span> «Панель» — поиск и настройки · «Авто» — красивый угол · боковая лента —
-            быстрый выбор · {hkDisp.search} — поиск · {hkDisp.clickThrough} — мышь · Esc — скрыть
-          </>
+        {overlayDensity === 'compact' ? (
+          <span className="sr-only">
+            {hkDisp.toggle} — открыть/скрыть
+          </span>
         ) : (
-          <>
-            <span className="text-white/55">⌨</span> {hkDisp.toggle} — окно · {hkDisp.search} — поиск · {hkDisp.clickThrough}{' '}
-            — режим мыши (оверлей ↔ игра)
-            {cheatSheetMode ? (
-              <>
-                {' '}
-                · в режиме «Карточки» <span className="text-white/55">← →</span> не переключают закрепы
-              </>
-            ) : (
-              <>
-                {' '}
-                · <span className="text-white/55">← →</span> между статьями в режиме «Читать»
-              </>
-            )}
-            {' '}
-            · Esc — из деталей или скрыть окно
-            <span className="mt-1 block text-white/35">
-              «Список» и боковая лента удобны для большого числа закрепов. Отдельные окна: {hkDisp.cheatsOverlay} —
-              шпаргалки · {hkDisp.collectionsOverlay} — подборки
-            </span>
-          </>
+          <span className="min-w-0 truncate font-mono text-[#b8b3cc]">
+            {hkDisp.toggle} — открыть/скрыть
+          </span>
         )}
+        <span className="flex shrink-0 items-center gap-2 tabular-nums text-[#6b6582]">
+          <button
+            type="button"
+            className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded px-1.5 can-hover:hover:bg-[#1d192a] can-hover:hover:text-[#e6e3ee]"
+            title="Все сочетания (?)"
+            onClick={() => setHotkeysModalOpen(true)}
+          >
+            ?
+          </button>
+          <span>{footerCounter}</span>
+        </span>
       </footer>
     </div>
   )
@@ -1382,6 +1410,7 @@ function ArticleDetailPane({
   pin,
   bodyText,
   fontScale,
+  uiScale,
   compact,
   readingComfort,
   focusMode,
@@ -1392,6 +1421,7 @@ function ArticleDetailPane({
   pin: Pinned
   bodyText: string
   fontScale: number
+  uiScale: number
   compact: boolean
   /** Узкая шапка + укрупнение для чтения в игре */
   readingComfort?: boolean
@@ -1411,7 +1441,7 @@ function ArticleDetailPane({
     <div
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-gradient-to-b from-[#0a0e14]/98 via-[#080b10]/95 to-black/90 shadow-[inset_0_0_0_1px_rgba(91,140,255,0.08),0_12px_40px_rgba(0,0,0,0.45)]"
       style={{
-        fontSize: `${12 * fontScale * (readingComfort ? 1.085 : 1)}px`,
+        fontSize: `${12 * fontScale * (readingComfort ? 1.085 : 1) * uiScale}px`,
         lineHeight: compact ? (readingComfort ? 1.52 : 1.42) : 1.58
       }}
     >
@@ -1419,7 +1449,7 @@ function ArticleDetailPane({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
-            className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-[10px] font-medium text-white/95 hover:bg-white/10"
+            className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-[10px] font-medium text-white/95 can-hover:hover:bg-white/10"
             onClick={onBack}
           >
             ← К списку
@@ -1428,7 +1458,7 @@ function ArticleDetailPane({
             {pin.document_id ? (
               <button
                 type="button"
-                className="rounded-lg border border-accent/35 bg-accent/15 px-2.5 py-1.5 text-[10px] font-medium text-accent hover:bg-accent/25"
+                className="rounded-lg border border-accent/35 bg-accent/15 px-2.5 py-1.5 text-[10px] font-medium text-accent can-hover:hover:bg-accent/25"
                 onClick={onOpenReader}
               >
                 Открыть в LexPatrol
@@ -1555,8 +1585,8 @@ function ToolBtn({
       onClick={onClick}
       className={`rounded-lg border px-2 py-1 text-[11px] transition active:scale-95 ${
         accent
-          ? 'border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20'
-          : 'border-white/10 bg-white/[0.06] text-white/90 hover:bg-white/12'
+          ? 'border-red-500/30 bg-red-500/10 text-red-200 can-hover:hover:bg-red-500/20'
+          : 'border-white/10 bg-white/[0.06] text-white/90 can-hover:hover:bg-white/12'
       }`}
     >
       {children}
@@ -1581,7 +1611,7 @@ function MiniBtn({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className="rounded bg-white/10 px-1.5 text-[10px] text-white/80 disabled:opacity-30 hover:bg-white/15"
+      className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded bg-white/10 px-1.5 text-[10px] text-white/80 disabled:opacity-30 can-hover:hover:bg-white/15"
     >
       {children}
     </button>
@@ -1593,7 +1623,7 @@ function NavBtn({ children, onClick }: { children: React.ReactNode; onClick: () 
     <button
       type="button"
       onClick={onClick}
-      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[12px] text-white hover:bg-white/10"
+      className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[12px] text-white can-hover:hover:bg-white/10"
     >
       {children}
     </button>
@@ -1610,13 +1640,13 @@ function LayoutPresetControl({
 }): JSX.Element {
   const items: { id: OverlayLayoutPreset; label: string; title: string }[] = [
     { id: 'compact', label: 'Компакт', title: 'Минимум места в углу экрана' },
-    { id: 'reading', label: 'Чтение', title: 'Такая же узкая шапка, но крупнее текст карточек и статьи' },
-    { id: 'full', label: 'Панель', title: 'Поиск по базе, фильтры и все переключатели' }
+    { id: 'reading', label: 'Чтение', title: 'Узкая шапка, крупнее текст карточек и статьи' },
+    { id: 'full', label: 'Панель', title: 'Больше поля для списка и чтения' }
   ]
   return (
     <div className="min-w-0">
-      <div className="text-[9px] font-medium uppercase tracking-wide text-white/45">Режим окна</div>
-      <div className="mt-1 flex rounded-lg border border-white/10 bg-black/40 p-0.5">
+      <div className="text-[9px] font-medium uppercase tracking-wide text-[#6b6582]">Режим окна</div>
+      <div className="mt-1 flex rounded-lg border border-[#322c4d] bg-[#1d192a] p-0.5">
         {items.map((it) => (
           <button
             key={it.id}
@@ -1625,17 +1655,14 @@ function LayoutPresetControl({
             onClick={() => onChange(it.id)}
             className={`flex-1 rounded-md px-1.5 py-1.5 text-[10px] font-semibold transition sm:px-2 ${
               value === it.id
-                ? 'bg-accent/35 text-white shadow-[0_0_0_1px_rgba(91,140,255,0.35)]'
-                : 'text-white/50 hover:bg-white/[0.06] hover:text-white/88'
+                ? 'bg-[#3c2e7a] text-[#e6e3ee] shadow-[inset_0_0_0_1px_#5a4ab0]'
+                : 'text-[#8a8497] can-hover:hover:bg-[#2a2540] can-hover:hover:text-[#e6e3ee]'
             }`}
           >
             {it.label}
           </button>
         ))}
       </div>
-      <p className="mt-1 text-[9px] leading-snug text-white/42">
-        «Чтение» — меньше шапка и крупнее текст. Поиск открывает полную панель.
-      </p>
     </div>
   )
 }
@@ -1645,24 +1672,29 @@ function OverlayOptionToggle({
   label,
   hint,
   checked,
-  onChange
+  onChange,
+  title: tip
 }: {
   label: string
   hint: string
   checked: boolean
   onChange: (v: boolean) => void
+  title?: string
 }): JSX.Element {
   return (
-    <label className="flex w-full cursor-pointer gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-2 py-1.5">
+    <label
+      title={tip}
+      className="flex w-full cursor-pointer gap-2 rounded-lg border border-[#322c4d] bg-[#1d192a] px-2 py-1.5"
+    >
       <input
         type="checkbox"
-        className="mt-0.5 shrink-0 accent-accent"
+        className="mt-0.5 shrink-0 accent-[#5a4ab0]"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />
       <span className="min-w-0">
-        <span className="block text-[10px] font-medium text-white/88">{label}</span>
-        <span className="mt-0.5 block text-[9px] leading-snug text-white/45">{hint}</span>
+        <span className="block text-[10px] font-medium text-[#e6e3ee]">{label}</span>
+        {hint ? <span className="mt-0.5 block text-[9px] leading-snug text-[#8a8497]">{hint}</span> : null}
       </span>
     </label>
   )

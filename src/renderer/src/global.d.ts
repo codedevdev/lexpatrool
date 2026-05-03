@@ -53,8 +53,39 @@ declare global {
           downloadUrl?: string
           publishedAt?: string
           message?: string
+          critical?: boolean
+          setupAsset?: { name: string; size: number; browser_download_url: string }
         }>
         repoLabel: () => Promise<string>
+        download: () => Promise<{ ok: true } | { ok: false; message: string }>
+        cancelDownload: () => Promise<{ ok: true }>
+        getPhase: () => Promise<{ phase: string; reason: string | null }>
+        apply: (payload: {
+          silent: boolean
+          route?: string
+          reader?: { documentId: string; articleId?: string }
+        }) => Promise<{ ok: true } | { ok: false; message: string }>
+        snoozeStatus: (latestVersion: string) => Promise<{ count: number; exhausted: boolean }>
+        snooze: (latestVersion: string) => Promise<{ ok: true; count: number; blocked: boolean } | { ok: false; count: number; blocked: boolean }>
+        inAppAvailable: () => Promise<{ supported: boolean }>
+        onPhase: (cb: (p: { phase: string; reason: string | null }) => void) => () => void
+        onProgress: (
+          cb: (p: {
+            received: number
+            total: number | null
+            percent: number | null
+            bytesPerSecond: number | null
+          }) => void
+        ) => () => void
+        onAfterUpdate: (
+          cb: (p: {
+            oldVersion: string
+            newVersion: string
+            releaseUrl: string
+            route?: string
+            reader?: { documentId: string; articleId?: string }
+          }) => void
+        ) => () => void
         onAvailable: (
           cb: (p: {
             currentVersion: string
@@ -63,6 +94,7 @@ declare global {
             downloadUrl: string
             publishedAt?: string
             releaseNotes?: string
+            critical?: boolean
           }) => void
         ) => () => void
       }
@@ -217,7 +249,7 @@ declare global {
             layoutPreset?: 'compact' | 'reading' | 'full'
             focusMode?: boolean
             fontScale?: number
-            toolsExpanded?: boolean
+            overlayBrightness?: number
             cheatSheetMode?: boolean
             articleListMode?: 'cards' | 'dense'
           }
@@ -237,6 +269,7 @@ declare global {
             | 'compact-top-right'
             | 'wide-right'
         ) => Promise<void>
+        applyLayoutPreset: (preset: 'compact' | 'reading' | 'full') => Promise<{ ok: true }>
         pin: (articleId: string) => Promise<
           { ok: true } | { ok: false; error?: 'invalid_id' | 'article_not_found' | 'database_error' }
         >
@@ -260,7 +293,7 @@ declare global {
             layoutPreset?: 'compact' | 'reading' | 'full'
             focusMode?: boolean
             fontScale?: number
-            toolsExpanded?: boolean
+            overlayBrightness?: number
             cheatSheetMode?: boolean
             articleListMode?: 'cards' | 'dense'
           }) => void

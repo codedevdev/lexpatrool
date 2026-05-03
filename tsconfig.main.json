@@ -12,6 +12,6 @@
     "esModuleInterop": true,
     "types": ["node"]
   },
-  "include": ["src/main/**/*", "src/shared/**/*", "src/db/**/*", "src/parsers/**/*", "src/services/**/*"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/main/**/*", "src/shared/**/*", "src/db/**/*", "src/parsers/**/*", "src/services/**/*", "src/test-utils/**/*"],
+  "exclude": []
 }

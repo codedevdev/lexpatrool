@@ -1,7 +1,7 @@
 # LexPatrol
 
 [![Последний релиз](https://img.shields.io/github/v/release/codedevdev/lexpatrool?style=flat-square&logo=github&label=релиз)](https://github.com/codedevdev/lexpatrool/releases/latest)
-[![Сборка Windows](https://img.shields.io/github/actions/workflow/status/codedevdev/lexpatrool/release-windows.yml?branch=main&style=flat-square&logo=githubactions&label=сборка)](https://github.com/codedevdev/lexpatrool/actions/workflows/release-windows.yml)
+[![Сборка Windows](https://img.shields.io/github/actions/workflow/status/codedevdev/lexpatrool/ci.yml?branch=main&style=flat-square&logo=githubactions&label=CI)](https://github.com/codedevdev/lexpatrool/actions/workflows/ci.yml)
 [![Скачивания](https://img.shields.io/github/downloads/codedevdev/lexpatrool/total?style=flat-square&logo=github&label=скачивания)](https://github.com/codedevdev/lexpatrool/releases)
 
 **LexPatrol** — десктопный справочник для роли в **государственных службах** в многопользовательском RP (часто на базе GTA V: полиция, шериф, EMS и другие структуры — как принято на вашем сервере). Вы сами наполняете базу: кодексы, уставы и правила с сайтов или своих текстов. Дальше — быстрый поиск по статьям и **оверлей**: отдельное окно поверх игры с закреплёнными материалами.
@@ -118,6 +118,41 @@
 - **GitHub** — [Issues](https://github.com/codedevdev/lexpatrool/issues) для багов и предложений по коду.
 
 В самом приложении те же ссылки есть в боковой панели и в разделе **Настройки**.
+
+---
+
+## Разработка: тесты и CI
+
+Стек: **Electron**, **TypeScript**, **Vitest**, **React**.
+
+### Команды
+
+| Команда | Назначение |
+|--------|------------|
+| `npm test` | Один прогон всех unit-тестов |
+| `npm run test:watch` | Watch-режим |
+| `npm run test:coverage` | Тесты + отчёты `lcov` / HTML в `coverage/` |
+| `npm run test:ci:critical` | Критические модули: пороги из [`vitest.critical.config.ts`](vitest.critical.config.ts) |
+| `npm run test:ci` | Полный набор тестов + пороги из [`vitest.config.ts`](vitest.config.ts) |
+| `npm run verify` | `lint` + `test:ci:critical` + `test:ci` + `electron-vite build` (проверка перед пушем) |
+| `npm run rebuild:native` | Пересобрать `better-sqlite3` под текущую версию Node (если Vitest ругается на `NODE_MODULE_VERSION`) |
+
+Покрытие вручную: откройте в браузере [`coverage/index.html`](coverage/index.html) после `npm run test:coverage`.
+
+Профиль **`test:ci:critical`** ([`vitest.critical.config.ts`](vitest.critical.config.ts)): порог **75%** по строкам/операторам для набора критических путей; по **веткам** задано **66%** как совокупный минимум (при расширении тестов его можно поднять к 70%+).
+
+### GitHub Actions
+
+- **[`ci.yml`](.github/workflows/ci.yml)** — на `pull_request` и на `push` в `main` / `master` / `develop`: параллельно **lint** и **test**; на push (включая теги `v*`) после успешных проверок — **сборка Windows**; для тега `v*` — публикация **GitHub Release** с установщиками и `.sha256`.
+- **[`release-windows.yml`](.github/workflows/release-windows.yml)** — только **workflow_dispatch**: ручная сборка артефактов без релиза (те же lint и тесты, затем `build:win`).
+
+### Branch protection (рекомендуется для `main`)
+
+В репозитории: **Settings → Branches → Branch protection** — для `main` включите обязательные статус-чеки **lint** и **test** из workflow **CI**, при необходимости требуйте «branch up to date» перед merge.
+
+### Секреты (опционально)
+
+- **`CODECOV_TOKEN`** — только если подключите [Codecov](https://codecov.io/) для отчётов по PR; иначе достаточно артефакта **coverage** в GitHub Actions.
 
 ---
 

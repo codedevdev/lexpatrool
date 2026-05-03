@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { LEX_COMMUNITY_DISCORD_URL, LEX_GITHUB_ISSUES_URL } from '../../lib/app-links'
 import { humanizeAcceleratorForUi, keyboardEventToAccelerator } from '../../lib/hotkey-format'
+import { useInAppUpdateFlow } from '../../hooks/useInAppUpdateFlow'
+import { UpdateInstallModal } from '../../components/UpdateInstallModal'
 
 type HotkeyField = 'toggle' | 'search' | 'clickThrough' | 'cheatsOverlay' | 'collectionsOverlay'
 type OverlayInteractionMode = 'game' | 'interactive'
@@ -14,9 +16,88 @@ const HOTKEY_ROW_META: Record<
 > = {
   toggle: { title: 'Оверлей закрепов', desc: 'Показать / скрыть оверлей закрепов' },
   search: { title: 'Поиск по базе', desc: 'Открыть оверлей и фокус на поиске по базе' },
-  clickThrough: { title: 'Мышь: оверлей ↔ игра', desc: 'Переключить режим мыши: оверлей ↔ игра' },
+  clickThrough: {
+    title: 'Мышь: оверлей ↔ игра',
+    desc: 'Переключить, куда идут клики: в оверлей LexPatrol или в игру под ним. В режиме «в игру» курсор не «залипает» в оверлее — ввод уходит в игру, оверлей остаётся видимым, но не перехватывает мышь.'
+  },
   cheatsOverlay: { title: 'Окно шпаргалок', desc: 'Показать / скрыть отдельное окно шпаргалок' },
   collectionsOverlay: { title: 'Окно подборок', desc: 'Показать / скрыть отдельное окно подборок' }
+}
+
+type AvailableUpdate = Extract<Awaited<ReturnType<typeof window.lawHelper.update.check>>, { status: 'available' }>
+
+function fmtBytesSetting(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function SettingsInAppUpdateBlock({ data }: { data: AvailableUpdate }): JSX.Element {
+  const lv = data.latestVersion ?? ''
+  const flow = useInAppUpdateFlow(lv)
+
+  return (
+    <div className="mt-4 space-y-3 rounded-xl border border-white/[0.08] bg-black/25 p-4">
+      <p className="text-xs font-medium text-white/90">Установка из приложения (Windows, не portable)</p>
+      {data.critical ? (
+        <p className="text-xs text-amber-200/95">Отмечено [critical] — рекомендуется обновиться как можно скорее.</p>
+      ) : null}
+      {flow.phase === 'downloading' || flow.phase === 'validating' ? (
+        <p className="text-xs text-app-muted">
+          {flow.phase === 'validating' ? 'Проверка файла…' : 'Скачивание'}
+          {flow.progress?.percent != null ? ` · ${flow.progress.percent.toFixed(0)}%` : ''}
+          {flow.progress?.bytesPerSecond != null && flow.progress.bytesPerSecond > 0
+            ? ` · ${fmtBytesSetting(flow.progress.bytesPerSecond)}/s`
+            : ''}
+        </p>
+      ) : null}
+      {flow.downloadError ? <p className="text-xs text-red-300/95">{flow.downloadError}</p> : null}
+      {flow.phase === 'ready-to-install' && !flow.installModal ? (
+        <button
+          type="button"
+          className="rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-100 hover:bg-emerald-500/15"
+          onClick={() => flow.setInstallModal(true)}
+        >
+          Продолжить установку
+        </button>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {flow.inApp === true ? (
+          <>
+            <button
+              type="button"
+              disabled={flow.busy || flow.phase === 'downloading' || flow.phase === 'validating'}
+              onClick={() => void flow.startDownload()}
+              className="rounded-lg bg-emerald-600/90 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+            >
+              {flow.phase === 'downloading' || flow.phase === 'validating' ? 'Скачивание…' : 'Скачать и обновить'}
+            </button>
+            {(flow.phase === 'downloading' || flow.phase === 'validating') && (
+              <button
+                type="button"
+                onClick={() => flow.cancelDownload()}
+                className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/[0.06]"
+              >
+                Отмена
+              </button>
+            )}
+          </>
+        ) : flow.inApp === false ? (
+          <p className="text-xs text-app-muted">На этой системе автоустановка недоступна — используйте внешнее скачивание.</p>
+        ) : null}
+      </div>
+      <UpdateInstallModal
+        open={flow.installModal}
+        latestVersion={lv}
+        silentInstall={flow.silentInstall}
+        onSilentChange={flow.setSilentInstall}
+        onCancel={() => {
+          flow.setInstallModal(false)
+        }}
+        onConfirm={() => void flow.confirmInstall()}
+      />
+    </div>
+  )
 }
 
 export function SettingsPage(): JSX.Element {
@@ -210,7 +291,7 @@ export function SettingsPage(): JSX.Element {
         setUpdateInfo(r.message ?? 'У вас установлена последняя доступная версия.')
       } else if (r.status === 'available') {
         setUpdateInfo(
-          `Доступна версия ${r.latestVersion}. Скачайте файл по кнопке ниже, закройте LexPatrol и запустите установщик.`
+          `Доступна версия ${r.latestVersion}. В Windows можно скачать и установить из приложения или открыть релиз на GitHub.`
         )
       } else if (r.status === 'skipped') {
         setUpdateInfo(r.message ?? 'Проверка отключена.')
@@ -236,8 +317,8 @@ export function SettingsPage(): JSX.Element {
         <h2 className="text-sm font-semibold text-white">Что здесь настраивается</h2>
         <ul className="list-inside list-disc space-y-2 text-xs leading-relaxed text-app-muted">
           <li>
-            <span className="text-white/85">Обновления</span> — узнать о новой версии и перейти к файлу на GitHub; установка —
-            скачать и запустить установщик самостоятельно.
+            <span className="text-white/85">Обновления</span> — проверка версии на GitHub; в Windows (не portable) доступно
+            скачивание и тихая установка из приложения с проверкой контрольной суммы.
           </li>
           <li>
             <span className="text-white/85">Горячие клавиши</span> — три действия по всей системе (оверлей, поиск по базе, режим
@@ -261,9 +342,8 @@ export function SettingsPage(): JSX.Element {
       <section className="glass space-y-4 rounded-2xl p-6">
         <h2 className="text-sm font-semibold text-white">Обновления</h2>
         <p className="text-xs leading-relaxed text-app-muted">
-          Сейчас у вас версия <span className="font-mono text-white/90">{appVersion || '…'}</span>. Файлы новых версий лежат на{' '}
-          <span className="font-mono text-white/80">github.com/{updateRepo || '…'}</span> — приложение лишь показывает, что
-          вышло обновление, и ведёт к странице со скачиванием.
+          Сейчас у вас версия <span className="font-mono text-white/90">{appVersion || '…'}</span>. Релизы:{' '}
+          <span className="font-mono text-white/80">github.com/{updateRepo || '…'}</span>.
         </p>
 
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
@@ -284,15 +364,12 @@ export function SettingsPage(): JSX.Element {
         </label>
 
         <details className="rounded-xl border border-white/[0.06] bg-black/20 px-4 py-3 text-xs text-app-muted">
-          <summary className="cursor-pointer select-none font-medium text-white/90">Как установить обновление</summary>
+          <summary className="cursor-pointer select-none font-medium text-white/90">Ручная установка</summary>
           <ol className="mt-3 list-decimal space-y-2 pl-5 leading-relaxed marker:text-accent">
-            <li>Нажмите «Проверить обновления» ниже или воспользуйтесь напоминанием — откроется страница релиза.</li>
-            <li>Скачайте установщик (.exe). Программа не качает и не ставит обновление без вашего участия.</li>
-            <li>Закройте LexPatrol, запустите скачанный файл и следуйте шагам установки. Затем снова откройте приложение.</li>
+            <li>Откройте страницу релиза на GitHub.</li>
+            <li>Скачайте установщик (.exe), закройте LexPatrol и запустите файл.</li>
+            <li>Следуйте шагам мастера, затем снова откройте приложение.</li>
           </ol>
-          <p className="mt-3 border-t border-white/[0.06] pt-3 text-[11px] leading-relaxed text-app-muted/95">
-            Так вы сами решаете, когда скачать файл и запустить установку — всё под вашим контролем.
-          </p>
         </details>
 
         <div className="flex flex-wrap gap-2">
@@ -334,9 +411,12 @@ export function SettingsPage(): JSX.Element {
             </pre>
           </div>
         ) : null}
+        {updateResult?.status === 'available' && updateResult.latestVersion ? (
+          <SettingsInAppUpdateBlock data={updateResult} />
+        ) : null}
         <p className="text-[11px] text-app-muted">
-          «Позже» скрывает напоминание для этой версии; когда появится ещё более новая — уведомление снова покажется (если
-          включено напоминание при запуске).
+          «Позже» в напоминании увеличивает счётчик (не более трёх раз на одну версию), затем обновление нужно установить.
+          Лог установки: папка данных приложения → <span className="font-mono text-white/70">logs/updater.log</span>.
         </p>
       </section>
 
@@ -638,9 +718,10 @@ export function SettingsPage(): JSX.Element {
             <span className="text-sm text-app-muted">
               <span className="font-medium text-white">Пропускать клики сквозь оверлей в игру</span>
               <span className="mt-1 block text-xs leading-relaxed opacity-90">
-                Когда включено, клики проходят в игру; на панели оверлея тот же режим переключается кнопкой или горячей клавишей{' '}
-                <span className="font-mono text-white/80">{hkDisplay.clickThrough}</span>. Сам оверлей в этом режиме нельзя
-                нажимать, пока не переключите мышь обратно в оверлей.
+                Когда включено, клики и курсор не остаются на оверлее — они проходят в игру под окном; LexPatrol не
+                удерживает мышь на себе, оверлей можно оставить поверх картинки. Переключить можно горячей клавишей{' '}
+                <span className="font-mono text-white/80">{hkDisplay.clickThrough}</span> или галочкой «Мышь в оверлее» в
+                самом оверлее. Пока режим «в игру» активен, по оверлею нажать нельзя — сначала верните мышь в оверлей.
               </span>
             </span>
           </label>

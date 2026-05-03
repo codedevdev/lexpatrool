@@ -29,5 +29,9 @@ export default {
       }
     }
   },
-  plugins: []
+  plugins: [
+    function ({ addVariant }) {
+      addVariant('can-hover', '@media (hover: hover) and (pointer: fine)')
+    }
+  ]
 }

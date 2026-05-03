@@ -1,19 +1,30 @@
 import { app, BrowserWindow, screen } from 'electron'
+import type { Display, Rectangle } from 'electron'
 import { join } from 'path'
 import type { Database } from 'better-sqlite3'
 import { fileURLToPath } from 'node:url'
 import { resolveAppIconPath } from './app-resources'
+import {
+  OVERLAY_EDGE_MARGIN,
+  OVERLAY_MAX_HEIGHT_FRAC,
+  OVERLAY_ULTRAWIDE_MAX_WIDTH,
+  overlayWidthForPreset,
+  overlayWorkAreaIsUltrawide,
+  type OverlayLayoutPreset
+} from './overlay-layout-constants'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 type GetDb = () => Database
 
 const BOUNDS_KEY = 'overlay_bounds'
+const OVERLAY_UI_PREFS_KEY = 'overlay_ui_prefs'
 const OVERLAY_AOT_KEY = 'overlay_always_on_top_level'
 const OVERLAY_OPACITY_KEY = 'overlay_opacity'
 const OVERLAY_CLICK_THROUGH_KEY = 'overlay_click_through'
 const OVERLAY_INTERACTION_MODE_KEY = 'overlay_interaction_mode'
-const DEFAULT_WIDTH_RATIO = 0.36
+
+const EDGE = OVERLAY_EDGE_MARGIN
 
 function olog(...args: unknown[]): void {
   console.log('[LexPatrol overlay]', ...args)
@@ -57,6 +68,8 @@ export type OverlayDockPosition =
   | 'wide-right'
 type RevealOptions = { forceFocus?: boolean }
 
+export type { OverlayLayoutPreset } from './overlay-layout-constants'
+
 function readOverlayAotLevel(db: Database): OverlayAotLevel {
   const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_AOT_KEY) as
     | { value: string }
@@ -76,22 +89,188 @@ function readOverlayInteractionMode(db: Database): OverlayInteractionMode {
   return 'game'
 }
 
+function readOverlayLayoutPreset(db: Database): OverlayLayoutPreset {
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_UI_PREFS_KEY) as
+    | { value: string }
+    | undefined
+  if (!row?.value) return 'full'
+  try {
+    const j = JSON.parse(row.value) as { layoutPreset?: string }
+    if (j.layoutPreset === 'compact' || j.layoutPreset === 'reading' || j.layoutPreset === 'full') {
+      return j.layoutPreset
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'full'
+}
+
 type Bounds = { x: number; y: number; width: number; height: number }
 
-function readBounds(db: Database): Bounds | null {
+type OverlayAnchor = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+type PersistedPlacementV2 = {
+  v: 2
+  displayId: number
+  anchor: OverlayAnchor
+  offsetXPct: number
+  offsetYPct: number
+  width: number
+  height: number
+}
+
+function clampPct(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  return Math.min(100, Math.max(0, n))
+}
+
+function resolveDisplayForPlacement(p: PersistedPlacementV2): Display {
+  const all = screen.getAllDisplays()
+  const found = all.find((d) => d.id === p.displayId)
+  return found ?? screen.getPrimaryDisplay()
+}
+
+function rectFromPlacement(p: PersistedPlacementV2, work: Rectangle): Bounds {
+  const sx = work.x
+  const sy = work.y
+  const sw = work.width
+  const sh = work.height
+  const ox = p.offsetXPct / 100
+  const oy = p.offsetYPct / 100
+  const w = p.width
+  const h = p.height
+  let x: number
+  let y: number
+  switch (p.anchor) {
+    case 'top-left':
+      x = sx + ox * sw
+      y = sy + oy * sh
+      break
+    case 'top-right':
+      x = sx + sw - w - ox * sw
+      y = sy + oy * sh
+      break
+    case 'bottom-left':
+      x = sx + ox * sw
+      y = sy + sh - h - oy * sh
+      break
+    case 'bottom-right':
+      x = sx + sw - w - ox * sw
+      y = sy + sh - h - oy * sh
+      break
+    default:
+      x = sx + sw - w - ox * sw
+      y = sy + oy * sh
+  }
+  return clampRectToWorkArea({ x, y, width: w, height: h }, work)
+}
+
+function inferPlacementFromBounds(b: Bounds, display: Display): PersistedPlacementV2 {
+  const work = display.workArea
+  const sx = work.x
+  const sy = work.y
+  const sw = work.width
+  const sh = work.height
+  const w = b.width
+  const h = b.height
+  const anchors: OverlayAnchor[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+  let best: PersistedPlacementV2 = {
+    v: 2,
+    displayId: display.id,
+    anchor: 'top-right',
+    offsetXPct: clampPct(((sx + sw - w - b.x) / sw) * 100),
+    offsetYPct: clampPct(((b.y - sy) / sh) * 100),
+    width: w,
+    height: h
+  }
+  let bestErr = Infinity
+  for (const anchor of anchors) {
+    let ox: number
+    let oy: number
+    switch (anchor) {
+      case 'top-left':
+        ox = ((b.x - sx) / sw) * 100
+        oy = ((b.y - sy) / sh) * 100
+        break
+      case 'top-right':
+        ox = ((sx + sw - w - b.x) / sw) * 100
+        oy = ((b.y - sy) / sh) * 100
+        break
+      case 'bottom-left':
+        ox = ((b.x - sx) / sw) * 100
+        oy = ((sy + sh - h - b.y) / sh) * 100
+        break
+      case 'bottom-right':
+        ox = ((sx + sw - w - b.x) / sw) * 100
+        oy = ((sy + sh - h - b.y) / sh) * 100
+        break
+    }
+    const oxC = clampPct(ox)
+    const oyC = clampPct(oy)
+    const r = rectFromPlacement(
+      { v: 2, displayId: display.id, anchor, offsetXPct: oxC, offsetYPct: oyC, width: w, height: h },
+      work
+    )
+    const err = Math.abs(r.x - b.x) + Math.abs(r.y - b.y)
+    if (err < bestErr) {
+      bestErr = err
+      best = { v: 2, displayId: display.id, anchor, offsetXPct: oxC, offsetYPct: oyC, width: w, height: h }
+    }
+  }
+  return best
+}
+
+function writePlacement(db: Database, p: PersistedPlacementV2): void {
+  db.prepare(
+    `INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(BOUNDS_KEY, JSON.stringify(p))
+}
+
+function readPersistedPlacement(db: Database): PersistedPlacementV2 | null {
   const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(BOUNDS_KEY) as
     | { value: string }
     | undefined
   if (!row?.value) return null
   try {
-    const b = JSON.parse(row.value) as { x?: number; y?: number; width?: number; height?: number }
-    if (
-      typeof b.x === 'number' &&
-      typeof b.y === 'number' &&
-      typeof b.width === 'number' &&
-      typeof b.height === 'number'
-    ) {
-      return { x: b.x, y: b.y, width: b.width, height: b.height }
+    const raw = JSON.parse(row.value) as Record<string, unknown>
+    if (raw['v'] === 2) {
+      const displayId = raw['displayId']
+      const anchor = raw['anchor']
+      const offsetXPct = raw['offsetXPct']
+      const offsetYPct = raw['offsetYPct']
+      const width = raw['width']
+      const height = raw['height']
+      if (
+        typeof displayId === 'number' &&
+        (anchor === 'top-left' || anchor === 'top-right' || anchor === 'bottom-left' || anchor === 'bottom-right') &&
+        typeof offsetXPct === 'number' &&
+        typeof offsetYPct === 'number' &&
+        typeof width === 'number' &&
+        typeof height === 'number' &&
+        width >= 200 &&
+        height >= 200
+      ) {
+        return {
+          v: 2,
+          displayId,
+          anchor,
+          offsetXPct: clampPct(offsetXPct),
+          offsetYPct: clampPct(offsetYPct),
+          width,
+          height
+        }
+      }
+    }
+    const x = raw['x']
+    const y = raw['y']
+    const w = raw['width']
+    const h = raw['height']
+    if (typeof x === 'number' && typeof y === 'number' && typeof w === 'number' && typeof h === 'number') {
+      const rect: Bounds = { x, y, width: w, height: h }
+      const display = screen.getDisplayMatching(rect)
+      const migrated = inferPlacementFromBounds(rect, display)
+      writePlacement(db, migrated)
+      return migrated
     }
   } catch {
     /* ignore */
@@ -99,10 +278,15 @@ function readBounds(db: Database): Bounds | null {
   return null
 }
 
-function writeBounds(db: Database, bounds: Bounds): void {
-  db.prepare(
-    `INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-  ).run(BOUNDS_KEY, JSON.stringify(bounds))
+function defaultInitialBounds(work: Rectangle, preset: OverlayLayoutPreset): Bounds {
+  const sw = work.width
+  const sh = work.height
+  const ultrawide = overlayWorkAreaIsUltrawide(work)
+  const width = overlayWidthForPreset(preset, sw, ultrawide)
+  const height = Math.min(Math.floor(sh * 0.78), Math.floor(sh * OVERLAY_MAX_HEIGHT_FRAC))
+  const x = work.x + sw - width - EDGE
+  const y = work.y + Math.max(EDGE, Math.min(48, Math.floor(sh * 0.04)))
+  return clampRectToWorkArea({ x, y, width, height }, work)
 }
 
 /** Оверлей: отдельное окно поверх других; не встраивается в процесс игры. */
@@ -112,9 +296,36 @@ export class OverlayController {
   private alwaysOnTopLevel: OverlayAotLevel = 'floating'
   private readonly getDb: GetDb
   private persistTimer: ReturnType<typeof setTimeout> | null = null
+  private displayMetricsTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly onDisplayMetricsChangedBound: () => void
 
   constructor(getDb: GetDb) {
     this.getDb = getDb
+    this.onDisplayMetricsChangedBound = (): void => {
+      if (this.displayMetricsTimer) clearTimeout(this.displayMetricsTimer)
+      this.displayMetricsTimer = setTimeout(() => {
+        this.displayMetricsTimer = null
+        this.applyDisplayMetricsUpdate()
+      }, 200)
+    }
+    screen.on('display-metrics-changed', this.onDisplayMetricsChangedBound)
+  }
+
+  private applyDisplayMetricsUpdate(): void {
+    const w = this.win
+    if (!w || w.isDestroyed() || !w.isVisible()) return
+    const db = this.getDb()
+    const placement = readPersistedPlacement(db)
+    if (!placement) {
+      const b = w.getBounds()
+      const work = screen.getDisplayMatching(b).workArea
+      w.setBounds(clampRectToWorkArea(b, work))
+      return
+    }
+    const display = resolveDisplayForPlacement(placement)
+    const work = display.workArea
+    const next = rectFromPlacement(placement, work)
+    w.setBounds(next)
   }
 
   getClickThrough(): boolean {
@@ -125,6 +336,26 @@ export class OverlayController {
     return readOverlayInteractionMode(this.getDb())
   }
 
+  /** Подогнать ширину под пресет UI, сохраняя край окна ближе к правой или левой границе workArea. */
+  applyLayoutPreset(preset: OverlayLayoutPreset): void {
+    const w = this.ensure()
+    if (w.isDestroyed()) return
+    const b = w.getBounds()
+    const display = screen.getDisplayMatching(b)
+    const work = display.workArea
+    const ultrawide = overlayWorkAreaIsUltrawide(work)
+    const newWidth = overlayWidthForPreset(preset, work.width, ultrawide)
+    const distLeft = b.x - work.x
+    const distRight = work.x + work.width - (b.x + b.width)
+    let x = distRight < distLeft ? b.x + b.width - newWidth : b.x
+    const maxH = Math.floor(work.height * OVERLAY_MAX_HEIGHT_FRAC)
+    const height = Math.min(b.height, maxH)
+    let next: Bounds = { x, y: b.y, width: newWidth, height }
+    next = clampRectToWorkArea(next, work)
+    w.setBounds(next)
+    this.schedulePersistBounds()
+  }
+
   private schedulePersistBounds(): void {
     const w = this.win
     if (!w || w.isDestroyed()) return
@@ -132,7 +363,10 @@ export class OverlayController {
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null
       try {
-        writeBounds(this.getDb(), w.getBounds())
+        const b = w.getBounds()
+        const display = screen.getDisplayMatching(b)
+        const placement = inferPlacementFromBounds(b, display)
+        writePlacement(this.getDb(), placement)
       } catch {
         /* ignore */
       }
@@ -148,20 +382,16 @@ export class OverlayController {
     olog('ensure: creating BrowserWindow')
     const db = this.getDb()
     this.alwaysOnTopLevel = readOverlayAotLevel(db)
-    const saved = readBounds(db)
-    const { width: sw, height: sh, x: sx, y: sy } = workAreaForInitialBounds(saved)
-
-    const defaultW = Math.min(440, Math.floor(sw * DEFAULT_WIDTH_RATIO))
-    const defaultH = Math.min(680, Math.floor(sh * 0.78))
-    const bounds: Bounds =
-      saved && saved.width >= 200 && saved.height >= 200
-        ? clampRectToWorkArea(saved, { x: sx, y: sy, width: sw, height: sh })
-        : {
-            width: defaultW,
-            height: defaultH,
-            x: sx + sw - defaultW - 12,
-            y: sy + 36
-          }
+    const placement = readPersistedPlacement(db)
+    const preset = readOverlayLayoutPreset(db)
+    let bounds: Bounds
+    if (placement) {
+      const display = resolveDisplayForPlacement(placement)
+      bounds = rectFromPlacement(placement, display.workArea)
+    } else {
+      const work = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+      bounds = defaultInitialBounds(work, preset)
+    }
 
     const transparent = overlayWindowTransparent()
     const iconPath = resolveAppIconPath()
@@ -191,14 +421,13 @@ export class OverlayController {
     try {
       this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     } catch {
-      /* best-effort: Windows may ignore this, but macOS/Linux benefit from it */
+      /* best-effort: Windows may ignore this, but macOS/Linux benefit from this */
     }
 
     olog('window created', {
       bounds,
       transparent,
-      alwaysOnTopLevel: this.alwaysOnTopLevel,
-      workArea: { sx, sy, sw, sh }
+      alwaysOnTopLevel: this.alwaysOnTopLevel
     })
 
     const ctRow = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(OVERLAY_CLICK_THROUGH_KEY) as
@@ -284,7 +513,9 @@ export class OverlayController {
     const w = this.ensure()
     const { width: sw, height: sh, x: sx, y: sy } = screen.getDisplayMatching(w.getBounds()).workArea
     const cur = w.getBounds()
-    const margin = 10
+    const margin = EDGE
+    const ultrawide = overlayWorkAreaIsUltrawide({ width: sw, height: sh })
+    const cap = (x: number): number => (ultrawide ? Math.min(x, OVERLAY_ULTRAWIDE_MAX_WIDTH) : x)
     switch (where) {
       case 'left':
         w.setBounds({ x: sx + margin, y: sy + margin, width: cur.width, height: sh - margin * 2 })
@@ -298,7 +529,8 @@ export class OverlayController {
         })
         break
       case 'wide-right': {
-        const width = Math.min(Math.max(cur.width, 520), Math.floor(sw * 0.42))
+        const target = Math.min(Math.max(cur.width, 520), Math.floor(sw * 0.42))
+        const width = cap(target)
         w.setBounds({
           x: sx + sw - width - margin,
           y: sy + margin,
@@ -307,38 +539,42 @@ export class OverlayController {
         })
         break
       }
-      case 'top-left':
+      case 'top-left': {
+        const width = ultrawide ? Math.min(cur.width, OVERLAY_ULTRAWIDE_MAX_WIDTH) : cur.width
         w.setBounds({
           x: sx + margin,
           y: sy + margin,
-          width: Math.min(cur.width, 480),
-          height: Math.min(cur.height, Math.floor(sh * 0.85))
+          width,
+          height: Math.min(cur.height, Math.floor(sh * OVERLAY_MAX_HEIGHT_FRAC))
         })
         break
-      case 'top-right':
+      }
+      case 'top-right': {
+        const width = ultrawide ? Math.min(cur.width, OVERLAY_ULTRAWIDE_MAX_WIDTH) : cur.width
         w.setBounds({
-          x: sx + sw - cur.width - margin,
+          x: sx + sw - width - margin,
           y: sy + margin,
-          width: Math.min(cur.width, 480),
-          height: Math.min(cur.height, Math.floor(sh * 0.85))
+          width,
+          height: Math.min(cur.height, Math.floor(sh * OVERLAY_MAX_HEIGHT_FRAC))
         })
         break
+      }
       case 'bottom-left': {
-        const width = Math.min(cur.width, 460)
+        const width = cap(Math.min(cur.width, 460))
         const height = Math.min(cur.height, Math.floor(sh * 0.72))
         w.setBounds({ x: sx + margin, y: sy + sh - height - margin, width, height })
         break
       }
       case 'bottom-right': {
-        const width = Math.min(cur.width, 460)
+        const width = cap(Math.min(cur.width, 460))
         const height = Math.min(cur.height, Math.floor(sh * 0.72))
         w.setBounds({ x: sx + sw - width - margin, y: sy + sh - height - margin, width, height })
         break
       }
       case 'compact-top-right': {
-        const width = Math.min(360, Math.max(320, Math.floor(sw * 0.28)))
+        const presetW = overlayWidthForPreset('compact', sw, ultrawide)
         const height = Math.min(520, Math.max(360, Math.floor(sh * 0.56)))
-        w.setBounds({ x: sx + sw - width - margin, y: sy + margin, width, height })
+        w.setBounds({ x: sx + sw - presetW - margin, y: sy + margin, width: presetW, height })
         break
       }
       default:
@@ -544,24 +780,14 @@ export class OverlayController {
   }
 }
 
-function clampRectToWorkArea(
-  rect: Bounds,
-  work: { x: number; y: number; width: number; height: number }
-): Bounds {
+function clampRectToWorkArea(rect: Bounds, work: Rectangle): Bounds {
   let { x, y, width, height } = rect
-  const maxW = work.width - 20
-  const maxH = work.height - 20
+  const inset = EDGE * 2
+  const maxW = Math.max(280, work.width - inset)
+  const maxH = Math.max(320, work.height - inset)
   width = Math.min(Math.max(width, 280), maxW)
   height = Math.min(Math.max(height, 320), maxH)
-  x = Math.min(Math.max(x, work.x), work.x + work.width - width - 8)
-  y = Math.min(Math.max(y, work.y), work.y + work.height - height - 8)
+  x = Math.min(Math.max(x, work.x + EDGE), work.x + work.width - width - EDGE)
+  y = Math.min(Math.max(y, work.y + EDGE), work.y + work.height - height - EDGE)
   return { x, y, width, height }
-}
-
-function workAreaForInitialBounds(saved: Bounds | null): Bounds {
-  if (saved) {
-    return screen.getDisplayMatching(saved).workArea
-  }
-  const cursor = screen.getCursorScreenPoint()
-  return screen.getDisplayNearestPoint(cursor).workArea
 }

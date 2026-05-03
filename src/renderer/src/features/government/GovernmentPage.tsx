@@ -226,7 +226,10 @@ export function GovernmentPage(): JSX.Element {
             <span className="font-mono text-[10px] text-accent/90">03</span>
             <p className="mt-2 text-[13px] font-medium text-white">В игре</p>
             <p className="mt-1.5 text-[11px] leading-snug text-app-muted">
-              Оверлей поверх окна: закрепы статей и поиск по базе ({hkDisp.search}). Переключение мыши — {hkDisp.clickThrough}.
+              Оверлей поверх окна: закрепы статей и поиск по базе ({hkDisp.search}).{' '}
+              <span className="font-mono text-white/75">{hkDisp.clickThrough}</span> — мышь «в игру»: курсор и клики не
+              попадают в оверлей, идут в игру; оверлей виден, но LexPatrol не перехватывает ввод, пока не переключите
+              обратно.
             </p>
             <button
               type="button"
@@ -418,7 +421,7 @@ export function GovernmentPage(): JSX.Element {
               </div>
               <div className="flex flex-wrap gap-x-2">
                 <dt className="font-mono text-white/75">{hkDisp.clickThrough}</dt>
-                <dd>клики в игру или в панель оверлея</dd>
+                <dd>мышь «в игру»: курсор не остаётся на оверлее, клики в игру под окном</dd>
               </div>
             </dl>
             <Link to="/settings" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">

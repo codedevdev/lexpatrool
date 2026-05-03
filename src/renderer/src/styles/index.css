@@ -96,3 +96,58 @@ main .max-w-6xl {
     transform: translateY(0);
   }
 }
+
+/* Оверлей: масштаб UI и слайдеры настроек (трек 4px, thumb 17px; coarse — 24px). */
+.lex-overlay-root {
+  --ui-scale: 1;
+}
+
+.lex-overlay-root .lex-ov-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+}
+
+.lex-overlay-root .lex-ov-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(50, 44, 77, 0.95);
+}
+
+.lex-overlay-root .lex-ov-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #5a4ab0;
+  margin-top: -6.5px;
+  border: 2px solid #1d192a;
+}
+
+.lex-overlay-root .lex-ov-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(50, 44, 77, 0.95);
+}
+
+.lex-overlay-root .lex-ov-range::-moz-range-thumb {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #5a4ab0;
+  border: 2px solid #1d192a;
+}
+
+@media (pointer: coarse) {
+  .lex-overlay-root .lex-ov-range::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -10px;
+  }
+  .lex-overlay-root .lex-ov-range::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
+}

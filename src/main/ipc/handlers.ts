@@ -3,20 +3,8 @@ import { setMainWindowAlwaysOnTop } from '../window-always-on-top'
 import type { BrowserWindow as ElectronBrowserWindow } from 'electron'
 import { writeFileSync, readFileSync } from 'fs'
 import type { Database } from 'better-sqlite3'
-
-function mergeAgentConfig(
-  db: Database,
-  base: AiProviderConfig,
-  agentId?: string | null
-): { cfg: AiProviderConfig; extra: string } {
-  if (!agentId) return { cfg: base, extra: '' }
-  const row = db
-    .prepare('SELECT system_prompt_extra FROM ai_agents WHERE id = ?')
-    .get(agentId) as { system_prompt_extra: string } | undefined
-  if (!row) return { cfg: base, extra: '' }
-  return { cfg: base, extra: row.system_prompt_extra ?? '' }
-}
 import { v4 as uuid } from 'uuid'
+import { mergeAgentConfig } from './merge-agent-config'
 import type {
   ImportPayload,
   ReplaceDocumentImportPayload,
@@ -54,6 +42,7 @@ import {
   rebuildArticleEmbeddings
 } from '../../services/embeddings'
 import type { OverlayController, OverlayDockPosition, OverlayInteractionMode } from '../overlay-window'
+import type { OverlayLayoutPreset } from '../overlay-layout-constants'
 import type { ToolOverlayController } from '../tool-overlay-window'
 import {
   applyOverlayGlobalShortcuts,
@@ -68,6 +57,15 @@ import {
 } from '../global-shortcuts'
 import { seedIfEmpty } from '../seed'
 import { checkForUpdates, getUpdateRepoLabel } from '../update-check'
+import {
+  applyValidatedInstallAndExit,
+  cancelUpdateDownload,
+  getUpdatePhase,
+  runDownloadAndValidate,
+  type ApplyInstallPayload,
+  type InstallContext
+} from '../updater'
+import { getSnoozeCountForVersion, isSnoozeExhaustedForVersion, recordUpdateSnooze } from '../updater/snooze'
 import { LEX_BACKUP_TABLE_ORDER } from '../backup-tables'
 import { parseBackupJson, restoreDatabaseFromBackupData } from '../backup-restore'
 
@@ -79,14 +77,13 @@ const OVERLAY_UI_PREFS_KEY = 'overlay_ui_prefs'
 
 type OverlayAotLevel = 'off' | 'floating' | 'screen-saver' | 'pop-up-menu'
 type OverlayArticleListMode = 'cards' | 'dense'
-type OverlayLayoutPreset = 'compact' | 'reading' | 'full'
 
 interface OverlayUiPrefs {
   opacity?: number
   layoutPreset?: OverlayLayoutPreset
   focusMode?: boolean
   fontScale?: number
-  toolsExpanded?: boolean
+  overlayBrightness?: number
   cheatSheetMode?: boolean
   articleListMode?: OverlayArticleListMode
 }
@@ -109,7 +106,7 @@ const GAME_OVERLAY_PROFILE: {
     layoutPreset: 'compact',
     focusMode: true,
     fontScale: 1,
-    toolsExpanded: false,
+    overlayBrightness: 1,
     cheatSheetMode: true,
     articleListMode: 'dense'
   }
@@ -225,6 +222,66 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('update:check', async () => checkForUpdates(app.getVersion()))
 
   ipcMain.handle('update:repo-label', async () => getUpdateRepoLabel())
+
+  const installCtx: InstallContext = {
+    getMainWindow: () => ctx.getMainWindow(),
+    overlay: ctx.overlay,
+    cheatToolOverlay: ctx.cheatToolOverlay,
+    collectionToolOverlay: ctx.collectionToolOverlay
+  }
+
+  ipcMain.handle('update:download', async () => {
+    const r = await runDownloadAndValidate(installCtx)
+    return r
+  })
+
+  ipcMain.handle('update:cancel-download', async () => {
+    cancelUpdateDownload(installCtx)
+    return { ok: true as const }
+  })
+
+  ipcMain.handle('update:get-phase', async () => getUpdatePhase())
+
+  ipcMain.handle('update:apply', async (_e, payload: ApplyInstallPayload | unknown) => {
+    const p = (payload ?? {}) as ApplyInstallPayload
+    return applyValidatedInstallAndExit(installCtx, {
+      silent: p.silent === true,
+      route: typeof p.route === 'string' ? p.route : undefined,
+      reader:
+        p.reader &&
+        typeof (p.reader as { documentId?: string }).documentId === 'string'
+          ? {
+              documentId: (p.reader as { documentId: string }).documentId,
+              articleId:
+                typeof (p.reader as { articleId?: string }).articleId === 'string'
+                  ? (p.reader as { articleId: string }).articleId
+                  : undefined
+            }
+          : undefined
+    })
+  })
+
+  ipcMain.handle('update:snooze-status', async (_e, latestVersion: unknown) => {
+    const v = typeof latestVersion === 'string' ? latestVersion : ''
+    if (!v) return { count: 0, exhausted: false }
+    const db = getDb()
+    return {
+      count: getSnoozeCountForVersion(db, v),
+      exhausted: isSnoozeExhaustedForVersion(db, v)
+    }
+  })
+
+  ipcMain.handle('update:snooze', async (_e, latestVersion: unknown) => {
+    const v = typeof latestVersion === 'string' ? latestVersion : ''
+    if (!v) return { ok: false as const, count: 0, blocked: true }
+    const db = getDb()
+    const { count, blocked } = recordUpdateSnooze(db, v)
+    return { ok: true as const, count, blocked }
+  })
+
+  ipcMain.handle('update:in-app-available', async () => ({
+    supported: process.platform === 'win32' && !process.env['PORTABLE_EXECUTABLE_DIR']
+  }))
 
   ipcMain.handle('db:backup', async () => {
     const win = ctx.getMainWindow()
@@ -1029,6 +1086,14 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   ipcMain.handle('overlay:dock', (_e, where: OverlayDockPosition) => {
     overlay.dock(where)
+  })
+
+  ipcMain.handle('overlay:apply-layout-preset', (_e, preset: unknown) => {
+    const p = preset as OverlayLayoutPreset
+    if (p === 'compact' || p === 'reading' || p === 'full') {
+      overlay.applyLayoutPreset(p)
+    }
+    return { ok: true as const }
   })
 
   const pickToolOverlay = (which: unknown): ToolOverlayController | null => {

@@ -37,8 +37,62 @@ const api = {
       downloadUrl?: string
       publishedAt?: string
       message?: string
+      critical?: boolean
+      setupAsset?: { name: string; size: number; browser_download_url: string }
     }> => ipcRenderer.invoke('update:check'),
     repoLabel: (): Promise<string> => ipcRenderer.invoke('update:repo-label'),
+    download: (): Promise<{ ok: true } | { ok: false; message: string }> => ipcRenderer.invoke('update:download'),
+    cancelDownload: (): Promise<{ ok: true }> => ipcRenderer.invoke('update:cancel-download'),
+    getPhase: (): Promise<{ phase: string; reason: string | null }> => ipcRenderer.invoke('update:get-phase'),
+    apply: (
+      payload: {
+        silent: boolean
+        route?: string
+        reader?: { documentId: string; articleId?: string }
+      }
+    ): Promise<{ ok: true } | { ok: false; message: string }> => ipcRenderer.invoke('update:apply', payload),
+    snoozeStatus: (latestVersion: string): Promise<{ count: number; exhausted: boolean }> =>
+      ipcRenderer.invoke('update:snooze-status', latestVersion),
+    snooze: (latestVersion: string): Promise<{ ok: true; count: number; blocked: boolean } | { ok: false; count: number; blocked: boolean }> =>
+      ipcRenderer.invoke('update:snooze', latestVersion),
+    inAppAvailable: (): Promise<{ supported: boolean }> => ipcRenderer.invoke('update:in-app-available'),
+    onPhase: (cb: (p: { phase: string; reason: string | null }) => void): (() => void) => {
+      const handler = (_: unknown, p: { phase: string; reason: string | null }): void => cb(p)
+      ipcRenderer.on('update:phase', handler)
+      return () => ipcRenderer.removeListener('update:phase', handler)
+    },
+    onProgress: (
+      cb: (p: { received: number; total: number | null; percent: number | null; bytesPerSecond: number | null }) => void
+    ): (() => void) => {
+      const handler = (
+        _: unknown,
+        p: { received: number; total: number | null; percent: number | null; bytesPerSecond: number | null }
+      ): void => cb(p)
+      ipcRenderer.on('update:progress', handler)
+      return () => ipcRenderer.removeListener('update:progress', handler)
+    },
+    onAfterUpdate: (
+      cb: (p: {
+        oldVersion: string
+        newVersion: string
+        releaseUrl: string
+        route?: string
+        reader?: { documentId: string; articleId?: string }
+      }) => void
+    ): (() => void) => {
+      const handler = (
+        _: unknown,
+        p: {
+          oldVersion: string
+          newVersion: string
+          releaseUrl: string
+          route?: string
+          reader?: { documentId: string; articleId?: string }
+        }
+      ): void => cb(p)
+      ipcRenderer.on('app:after-update', handler)
+      return () => ipcRenderer.removeListener('app:after-update', handler)
+    },
     onAvailable: (
       cb: (p: {
         currentVersion: string
@@ -47,6 +101,7 @@ const api = {
         downloadUrl: string
         publishedAt?: string
         releaseNotes?: string
+        critical?: boolean
       }) => void
     ): (() => void) => {
       const handler = (
@@ -58,6 +113,7 @@ const api = {
           downloadUrl: string
           publishedAt?: string
           releaseNotes?: string
+          critical?: boolean
         }
       ): void => cb(p)
       ipcRenderer.on('app:update-available', handler)
@@ -243,6 +299,8 @@ const api = {
         | 'wide-right'
     ): Promise<void> =>
       ipcRenderer.invoke('overlay:dock', where),
+    applyLayoutPreset: (preset: 'compact' | 'reading' | 'full'): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('overlay:apply-layout-preset', preset),
     raise: (): Promise<boolean> => ipcRenderer.invoke('overlay:raise'),
     applyGameProfile: (): Promise<{
       ok: true
@@ -256,7 +314,7 @@ const api = {
         layoutPreset?: 'compact' | 'reading' | 'full'
         focusMode?: boolean
         fontScale?: number
-        toolsExpanded?: boolean
+        overlayBrightness?: number
         cheatSheetMode?: boolean
         articleListMode?: 'cards' | 'dense'
       }
@@ -296,7 +354,7 @@ const api = {
         layoutPreset?: 'compact' | 'reading' | 'full'
         focusMode?: boolean
         fontScale?: number
-        toolsExpanded?: boolean
+        overlayBrightness?: number
         cheatSheetMode?: boolean
         articleListMode?: 'cards' | 'dense'
       }) => void
@@ -308,7 +366,7 @@ const api = {
           layoutPreset?: 'compact' | 'reading' | 'full'
           focusMode?: boolean
           fontScale?: number
-          toolsExpanded?: boolean
+          overlayBrightness?: number
           cheatSheetMode?: boolean
           articleListMode?: 'cards' | 'dense'
         }

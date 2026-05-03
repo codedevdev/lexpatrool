@@ -211,7 +211,7 @@ export function DashboardPage(): JSX.Element {
               </div>
               <div className="flex flex-wrap gap-x-2 gap-y-0.5">
                 <dt className="shrink-0 font-mono text-[10px] text-white/70">{hkDisp.clickThrough}</dt>
-                <dd>клики в игру / в панель</dd>
+                <dd>клики в игру: курсор не остаётся на оверлее, ввод в игру под окном</dd>
               </div>
             </dl>
             <Link to="/settings" className="mt-3 inline-block text-[11px] text-accent hover:underline">

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { CommandPalette } from './CommandPalette'
+import { InAppUpdateBanner, type InAppBannerPayload } from './InAppUpdateBanner'
 import { LEX_COMMUNITY_DISCORD_URL } from '../lib/app-links'
 import brandLogo from '../assets/brand-logo.png'
 
@@ -18,51 +19,40 @@ const nav = [
   { to: '/settings', label: 'Настройки' }
 ]
 
-const DISMISS_UPDATE_KEY = 'lexpatrol-dismiss-update-version'
-
-type UpdateBanner = {
-  currentVersion: string
-  latestVersion: string
-  releaseUrl: string
-  downloadUrl: string
-  publishedAt?: string
-  releaseNotes?: string
-}
-
-function fmtReleaseDate(iso?: string): string {
-  if (!iso?.trim()) return ''
-  try {
-    return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-  } catch {
-    return iso
-  }
-}
-
 export function AppShell({ children }: { children: ReactNode }): JSX.Element {
-  const [banner, setBanner] = useState<UpdateBanner | null>(null)
+  const [banner, setBanner] = useState<InAppBannerPayload | null>(null)
+  const [updateToast, setUpdateToast] = useState<{ text: string; url: string } | null>(null)
 
   useEffect(() => {
     const off = window.lawHelper.update.onAvailable((p) => {
-      try {
-        if (localStorage.getItem(DISMISS_UPDATE_KEY) === p.latestVersion) return
-      } catch {
-        /* ignore */
-      }
-      setBanner(p)
+      setBanner({
+        currentVersion: p.currentVersion,
+        latestVersion: p.latestVersion,
+        releaseUrl: p.releaseUrl,
+        downloadUrl: p.downloadUrl,
+        publishedAt: p.publishedAt,
+        releaseNotes: p.releaseNotes,
+        critical: p.critical
+      })
     })
     return () => off()
   }, [])
 
-  function dismissBanner(): void {
-    if (banner) {
-      try {
-        localStorage.setItem(DISMISS_UPDATE_KEY, banner.latestVersion)
-      } catch {
-        /* ignore */
-      }
-    }
-    setBanner(null)
-  }
+  useEffect(() => {
+    const off = window.lawHelper.update.onAfterUpdate((p) => {
+      setUpdateToast({
+        text: `Обновлено до v${p.newVersion} (было v${p.oldVersion}).`,
+        url: p.releaseUrl
+      })
+    })
+    return () => off()
+  }, [])
+
+  useEffect(() => {
+    if (!updateToast) return
+    const t = window.setTimeout(() => setUpdateToast(null), 9000)
+    return () => window.clearTimeout(t)
+  }, [updateToast])
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-canvas text-app selection:bg-accent/25 selection:text-white">
@@ -139,61 +129,26 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
           </div>
         </aside>
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {banner ? (
-            <div
-              className="shrink-0 border-b border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3 sm:px-8"
-              role="status"
-            >
-              <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0 text-sm text-emerald-50/95">
-                  <span className="font-semibold text-white">Доступна новая версия</span>{' '}
-                  <span className="text-emerald-100/85">
-                    {banner.currentVersion} → {banner.latestVersion}
-                  </span>
-                  {fmtReleaseDate(banner.publishedAt) ? (
-                    <span className="ml-2 text-xs text-emerald-100/55">· {fmtReleaseDate(banner.publishedAt)}</span>
-                  ) : null}
-                  <span className="mt-1 block text-xs leading-snug text-emerald-100/70">
-                    Откроется страница с файлом: скачайте установщик, закройте LexPatrol и запустите его — как при обычной
-                    установке программы.
-                  </span>
-                  {banner.releaseNotes ? (
-                    <p className="mt-2 max-h-[4.5rem] overflow-y-auto whitespace-pre-wrap rounded-md border border-emerald-500/20 bg-black/20 px-2 py-1.5 text-[11px] leading-relaxed text-emerald-50/90 lex-app-scroll">
-                      {banner.releaseNotes}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-white/15 bg-white/[0.08] px-3 py-1.5 text-xs font-medium text-white hover:bg-white/[0.12]"
-                    onClick={() => window.lawHelper.shell.openExternal(banner.releaseUrl)}
-                  >
-                    Страница релиза
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg bg-emerald-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
-                    onClick={() => window.lawHelper.shell.openExternal(banner.downloadUrl)}
-                  >
-                    Скачать файл
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-emerald-100/90 hover:bg-white/[0.06]"
-                    onClick={() => dismissBanner()}
-                  >
-                    Позже
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          {banner ? <InAppUpdateBanner data={banner} onDismissed={() => setBanner(null)} /> : null}
           <div className="min-h-0 flex-1 overflow-y-auto lex-app-scroll">
             <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-8">{children}</div>
           </div>
         </main>
       </div>
+      {updateToast ? (
+        <div className="fixed bottom-6 left-1/2 z-[220] flex w-[min(92vw,28rem)] -translate-x-1/2 flex-col gap-2 rounded-xl border border-emerald-500/30 bg-[#0f1218]/95 px-4 py-3 text-sm text-emerald-50 shadow-xl backdrop-blur-md">
+          <p className="leading-snug">{updateToast.text}</p>
+          {updateToast.url ? (
+            <button
+              type="button"
+              className="self-start text-xs font-medium text-accent underline-offset-2 hover:underline"
+              onClick={() => void window.lawHelper.shell.openExternal(updateToast.url)}
+            >
+              Открыть страницу релиза
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <CommandPalette />
     </div>
   )
